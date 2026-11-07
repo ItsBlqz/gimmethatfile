@@ -45,5 +45,5 @@ body:
       label: Debug log (optional but very helpful)
       description: |
         Run the CLI with logging, then paste the output:
-        `VDL_DEBUG=1 cargo run --release -p vdl-engine --example get -- <url> 8 ./out`
+        `GTF_DEBUG=1 cargo run --release -p gtf-engine --example get -- <url> 8 ./out`
       render: text

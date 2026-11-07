@@ -1,4 +1,4 @@
-# Contributing to Vibe Downloader
+# Contributing to Gimme That File
 
 Thanks for helping out. Bug reports, server quirks we don't handle, UI polish,
 docs and code are all welcome.
@@ -7,7 +7,7 @@ docs and code are all welcome.
 
 - **Report a bug** with the [bug report form](../../issues/new?template=bug_report.yml).
   If a download fails on a specific server, the most useful thing you can give
-  us is the output with `VDL_DEBUG=1` (see below). Please don't post private or
+  us is the output with `GTF_DEBUG=1` (see below). Please don't post private or
   signed links.
 - **Suggest a feature** with the [feature request form](../../issues/new?template=feature_request.yml).
   Check the roadmap in the README and the existing issues first.
@@ -27,10 +27,10 @@ You need:
 - **macOS:** Xcode Command Line Tools
 
 ```sh
-git clone https://github.com/ItsBlqz/vibe-downloader
-cd vibe-downloader
-cargo run -p vibe-downloader          # start the app
-cargo test -p vdl-engine              # run the engine tests
+git clone https://github.com/ItsBlqz/gimmethatfile
+cd gimmethatfile
+cargo run -p gimmethatfile          # start the app
+cargo test -p gtf-engine              # run the engine tests
 ```
 
 The UI is plain HTML/CSS/JS in `ui/`, with no Node or bundler. Edit and restart
@@ -40,14 +40,14 @@ the app.
 
 | Variable | Effect |
 |---|---|
-| `VIBE_DOWNLOADER_DATA_DIR=<dir>` | Use a different folder for the download list and settings, so you don't touch your real one. |
-| `VDL_DEBUG=1` | Log retries, throttling and connection-count changes to stderr. |
+| `GIMMETHATFILE_DATA_DIR=<dir>` | Use a different folder for the download list and settings, so you don't touch your real one. |
+| `GTF_DEBUG=1` | Log retries, throttling and connection-count changes to stderr. |
 
 ### Trying the engine without the UI
 
 ```sh
-cargo run --release -p vdl-engine --example get -- <url> 8 ./out
-cargo run --release -p vdl-engine --example bench           # local, reproducible
+cargo run --release -p gtf-engine --example get -- <url> 8 ./out
+cargo run --release -p gtf-engine --example bench           # local, reproducible
 ```
 
 ## Before you open a pull request

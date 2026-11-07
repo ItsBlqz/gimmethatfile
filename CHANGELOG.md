@@ -22,10 +22,10 @@ First release.
   (different size or ETag) is detected and restarted.
 - Download queue with a configurable number of simultaneous downloads.
 - Single-connection fallback for servers without range support.
-- Clean light/dark UI: paste links anywhere, drag links onto the window,
+- Clean, flat UI with a custom title bar and System/Light/Dark themes: paste links anywhere, drag links onto the window,
   per-connection segment map, speed and time left.
-- `VIBE_DOWNLOADER_DATA_DIR` to use a separate download list, and `VDL_DEBUG=1`
+- `GIMMETHATFILE_DATA_DIR` to use a separate download list, and `GTF_DEBUG=1`
   for engine logs.
 
-[Unreleased]: https://github.com/ItsBlqz/vibe-downloader/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/ItsBlqz/vibe-downloader/releases/tag/v0.1.0
+[Unreleased]: https://github.com/ItsBlqz/gimmethatfile/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ItsBlqz/gimmethatfile/releases/tag/v0.1.0

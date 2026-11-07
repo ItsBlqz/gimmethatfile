@@ -4,16 +4,16 @@
 //! (many real hosts do this) and downloads the same file with 1, 2, 4, 8 and
 //! 16 connections.
 //!
-//!     cargo run --release -p vdl-engine --example bench -- [per_conn_MBps] [file_MB]
+//!     cargo run --release -p gtf-engine --example bench -- [per_conn_MBps] [file_MB]
 //!
 //! Defaults: 2 MB/s per connection, 64 MB file.
 
+use gtf_engine::{Manager, Settings, Status};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use vdl_engine::{Manager, Settings, Status};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -27,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
             .collect(),
     );
     let addr = serve(body.clone(), per_conn_mbps * 1e6).await;
-    let work = std::env::temp_dir().join(format!("vdl-bench-{}", std::process::id()));
+    let work = std::env::temp_dir().join(format!("gtf-bench-{}", std::process::id()));
     std::fs::create_dir_all(&work)?;
 
     println!("Local server: {file_mb} MB file, each connection capped at {per_conn_mbps} MB/s\n");

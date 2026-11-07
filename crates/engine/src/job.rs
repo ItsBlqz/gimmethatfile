@@ -23,8 +23,8 @@ use tokio_util::sync::CancellationToken;
 
 macro_rules! debug {
     ($($t:tt)*) => {
-        if std::env::var_os("VDL_DEBUG").is_some() {
-            eprintln!("[vdl] {}", format!($($t)*));
+        if std::env::var_os("GTF_DEBUG").is_some() {
+            eprintln!("[gtf] {}", format!($($t)*));
         }
     };
 }

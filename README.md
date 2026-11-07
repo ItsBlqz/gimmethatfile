@@ -2,28 +2,31 @@
 
 <img src="app/icon.svg" width="88" alt="" />
 
-# Vibe Downloader
+# Gimme That File
 
 **A fast, clean download manager written in Rust.**
 Paste a link, pick a folder, done.
 
-[![CI](https://github.com/ItsBlqz/vibe-downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/ItsBlqz/vibe-downloader/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/ItsBlqz/vibe-downloader?sort=semver)](https://github.com/ItsBlqz/vibe-downloader/releases/latest)
+[![CI](https://github.com/ItsBlqz/gimmethatfile/actions/workflows/ci.yml/badge.svg)](https://github.com/ItsBlqz/gimmethatfile/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/ItsBlqz/gimmethatfile?sort=semver)](https://github.com/ItsBlqz/gimmethatfile/releases/latest)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
-<img src="docs/screenshot.png" width="820" alt="Vibe Downloader showing two downloads in progress with 8 connections each, a paused download and three completed ones" />
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshot-light.png" />
+  <img src="docs/screenshot.png" width="820" alt="Gimme That File showing two downloads in progress with 8 connections each, a paused download and two completed ones" />
+</picture>
 
 </div>
 
 ## Download
 
 **Windows 10/11 (64-bit):** get the latest version from the
-[**Releases page**](https://github.com/ItsBlqz/vibe-downloader/releases/latest).
+[**Releases page**](https://github.com/ItsBlqz/gimmethatfile/releases/latest).
 
 | File | What it is |
 |---|---|
-| `VibeDownloader-x.y.z-x64-setup.exe` | Installer (recommended). Adds a Start menu entry and an uninstaller. |
-| `VibeDownloader-x.y.z-x64-portable.exe` | Single file, no install. |
+| `GimmeThatFile-x.y.z-x64-setup.exe` | Installer (recommended). Adds a Start menu entry and an uninstaller. |
+| `GimmeThatFile-x.y.z-x64-portable.exe` | Single file, no install. |
 | `SHA256SUMS.txt` | Checksums to verify your download. |
 
 > The app isn't code-signed yet, so Windows SmartScreen may show a warning.
@@ -45,13 +48,13 @@ tested on Linux; you can [build from source](#building-from-source).
 - **Pause and resume**, even after closing the app or a crash. If the file
   changes on the server, the app notices and restarts it.
 - **Queue**: choose how many downloads run at once.
-- **Safe by default**: downloads go to `name.ext.vdpart` and are renamed only
+- **Safe by default**: downloads go to `name.ext.gtfpart` and are renamed only
   when complete. Existing files are never overwritten, and file names from
   servers are sanitized.
 - **Small and quick**: about a 2 MB installer, using the system WebView instead
   of a bundled browser.
 - Paste links anywhere (`Ctrl+V`), drag links onto the window, `Ctrl+N` to add.
-  Light and dark themes follow your system.
+  Light, dark, or follow your system.
 
 ## How it works
 
@@ -64,8 +67,8 @@ GET /file.iso
 Range: bytes=52428800-
 ```
 
-The server answers `206 Partial Content` with just that part. So Vibe
-Downloader:
+The server answers `206 Partial Content` with just that part. So Gimme That
+File:
 
 1. **Probes** with `Range: bytes=0-0` to learn the size and whether ranges
    work. If they don't, it falls back to one connection.
@@ -84,7 +87,7 @@ The full design, including the invariants that keep downloads correct, is in
 ## Benchmarks
 
 Against a local server that caps each connection at 2 MB/s (a reproducible
-setup: `cargo run --release -p vdl-engine --example bench`):
+setup: `cargo run --release -p gtf-engine --example bench`):
 
 | Connections | 1 | 2 | 4 | 8 | 16 |
 |---|---:|---:|---:|---:|---:|
@@ -101,9 +104,9 @@ Build Tools (C++ workload); WebView2 ships with Windows 10/11. On Linux, the
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/#linux).
 
 ```sh
-git clone https://github.com/ItsBlqz/vibe-downloader
-cd vibe-downloader
-cargo run -p vibe-downloader              # run the app
+git clone https://github.com/ItsBlqz/gimmethatfile
+cd gimmethatfile
+cargo run -p gimmethatfile              # run the app
 cargo test --workspace                    # run the tests
 
 # Build the installer (output: target/release/bundle/nsis/)
@@ -112,8 +115,8 @@ cd app && cargo tauri build
 ```
 
 The download list and settings are stored in
-`%APPDATA%\com.itsblqz.vibedownloader\downloads.json`. Set
-`VIBE_DOWNLOADER_DATA_DIR` to use a different folder.
+`%APPDATA%\com.itsblqz.gimmethatfile\downloads.json`. Set
+`GIMMETHATFILE_DATA_DIR` to use a different folder.
 
 ## Project layout
 
@@ -140,7 +143,7 @@ docs/               Architecture and benchmarks
 - [ ] Scheduler (start and stop at set times)
 - [ ] macOS and Linux release builds
 
-Ideas and votes are welcome in [issues](https://github.com/ItsBlqz/vibe-downloader/issues).
+Ideas and votes are welcome in [issues](https://github.com/ItsBlqz/gimmethatfile/issues).
 
 ## Contributing
 
@@ -160,5 +163,5 @@ at your option. Unless you explicitly state otherwise, any contribution you
 intentionally submit for inclusion in this project is dual licensed as above,
 without any additional terms or conditions.
 
-Vibe Downloader is a general-purpose tool. You are responsible for having the
+Gimme That File is a general-purpose tool. You are responsible for having the
 right to download the files you download with it.

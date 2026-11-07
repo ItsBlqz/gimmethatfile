@@ -1,9 +1,9 @@
 //! Command-line download, handy for benchmarking the engine:
 //!
-//!     cargo run --release -p vdl-engine --example get -- <url> [connections] [dir]
+//!     cargo run --release -p gtf-engine --example get -- <url> [connections] [dir]
 
+use gtf_engine::{Manager, Settings, Status};
 use std::time::{Duration, Instant};
-use vdl_engine::{Manager, Settings, Status};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -63,5 +63,5 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn tempfile_path() -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("vdl-example-{}.json", std::process::id()))
+    std::env::temp_dir().join(format!("gtf-example-{}.json", std::process::id()))
 }

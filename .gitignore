@@ -1,4 +1,4 @@
 /target
 /app/gen
-*.vdpart
+*.gtfpart
 .DS_Store

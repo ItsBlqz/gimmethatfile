@@ -26,7 +26,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          v=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="vibe-downloader") | .version')
+          v=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="gimmethatfile") | .version')
           echo "version=$v" >> "$GITHUB_OUTPUT"
           if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$v" ]]; then
             echo "::error::Tag $GITHUB_REF_NAME does not match the version in Cargo.toml ($v)"
@@ -34,7 +34,7 @@ jobs:
           fi
 
       - name: Test
-        run: cargo test -p vdl-engine
+        run: cargo test -p gtf-engine
 
       - name: Build installer
         working-directory: app
@@ -45,13 +45,13 @@ jobs:
         run: |
           v=${{ steps.version.outputs.version }}
           mkdir dist
-          cp "target/release/bundle/nsis/Vibe Downloader_${v}_x64-setup.exe" "dist/VibeDownloader-${v}-x64-setup.exe"
-          cp target/release/vibe-downloader.exe "dist/VibeDownloader-${v}-x64-portable.exe"
+          cp "target/release/bundle/nsis/Gimme That File_${v}_x64-setup.exe" "dist/GimmeThatFile-${v}-x64-setup.exe"
+          cp target/release/gimmethatfile.exe "dist/GimmeThatFile-${v}-x64-portable.exe"
           cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: VibeDownloader-${{ steps.version.outputs.version }}-windows
+          name: GimmeThatFile-${{ steps.version.outputs.version }}-windows
           path: dist/*
 
       - name: Create draft release
@@ -70,8 +70,8 @@ jobs:
           cat >> notes.md <<'EOF'
 
           ---
-          **Windows:** download `VibeDownloader-*-x64-setup.exe` (installer) or `*-portable.exe` (no install).
+          **Windows:** download `GimmeThatFile-*-x64-setup.exe` (installer) or `*-portable.exe` (no install).
           The app isn't code-signed yet, so Windows SmartScreen may warn you: click **More info → Run anyway**.
           Verify downloads with `SHA256SUMS.txt`.
           EOF
-          gh release create "$GITHUB_REF_NAME" dist/* --draft --title "Vibe Downloader $GITHUB_REF_NAME" --notes-file notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --draft --title "Gimme That File $GITHUB_REF_NAME" --notes-file notes.md

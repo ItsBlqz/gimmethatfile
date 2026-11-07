@@ -41,7 +41,7 @@ Queued ──schedule()──▶ Connecting ──probe ok──▶ Downloading 
    running. Each running download has a `Job`.
 3. `Inner::drive` probes the server and decides between a **fresh** start and a
    **resume**. It resumes only if the size and ETag are unchanged and the
-   `.vdpart` file exists. It then opens or creates the part file and runs either
+   `.gtfpart` file exists. It then opens or creates the part file and runs either
    `download_ranged` (range support) or `download_single`.
 4. On success, the part file is renamed to the final name. `Inner::run` records
    the outcome, saves, and calls `schedule()` again.
@@ -85,11 +85,11 @@ flag. Workers are tokio tasks, each holding one HTTP connection.
 ## Persistence
 
 `downloads.json` in the app data directory (override with
-`VIBE_DOWNLOADER_DATA_DIR`). It is written atomically (temporary file, then
+`GIMMETHATFILE_DATA_DIR`). It is written atomically (temporary file, then
 rename) on every state change and every 3 s while downloading. Downloads that
 were running when the app quit are reloaded as `Queued` and continue on their own.
 
-The partial file is `<name>.vdpart`, pre-sized and marked sparse on Windows,
+The partial file is `<name>.gtfpart`, pre-sized and marked sparse on Windows,
 because NTFS would otherwise zero-fill everything before a far-away write.
 
 ## Testing

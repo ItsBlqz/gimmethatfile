@@ -3,7 +3,7 @@ use std::path::Path;
 use url::Url;
 
 /// Extension used for files that are still downloading.
-pub const PART_EXT: &str = ".vdpart";
+pub const PART_EXT: &str = ".gtfpart";
 
 /// Parse `Content-Disposition`, preferring RFC 5987 `filename*=UTF-8''...`.
 pub fn from_content_disposition(value: &str) -> Option<String> {

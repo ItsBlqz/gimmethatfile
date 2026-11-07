@@ -1,4 +1,4 @@
-//! Vibe Downloader engine: multi-connection, resumable HTTP downloads.
+//! Gimme That File engine: multi-connection, resumable HTTP downloads.
 
 mod fsutil;
 mod job;

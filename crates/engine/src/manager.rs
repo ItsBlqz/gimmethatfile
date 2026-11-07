@@ -17,7 +17,7 @@ use url::Url;
 
 // An honest UA on purpose: pretending to be Chrome without Chrome's TLS
 // fingerprint gets connections dropped by bot protection on many CDNs.
-const USER_AGENT: &str = concat!("VibeDownloader/", env!("CARGO_PKG_VERSION"));
+const USER_AGENT: &str = concat!("GimmeThatFile/", env!("CARGO_PKG_VERSION"));
 
 /// Handle to the download manager. Cheap to clone.
 #[derive(Clone)]

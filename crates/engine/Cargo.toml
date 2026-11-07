@@ -1,5 +1,5 @@
 [package]
-name = "vdl-engine"
+name = "gtf-engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

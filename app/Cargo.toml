@@ -1,5 +1,5 @@
 [package]
-name = "vibe-downloader"
+name = "gimmethatfile"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -17,4 +17,4 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["time", "sync"] }
-vdl-engine = { path = "../crates/engine" }
+gtf-engine = { path = "../crates/engine" }

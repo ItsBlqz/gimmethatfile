@@ -15,7 +15,7 @@ fixed speed, as many real file hosts do, then downloads the same file with
 1, 2, 4, 8 and 16 connections. No internet is needed.
 
 ```sh
-cargo run --release -p vdl-engine --example bench -- 2 128   # 2 MB/s per connection, 128 MB file
+cargo run --release -p gtf-engine --example bench -- 2 128   # 2 MB/s per connection, 128 MB file
 ```
 
 | Connections | Time | Average speed | Speed-up |
@@ -68,9 +68,9 @@ indicative only.
 ## Running your own
 
 ```sh
-cargo build --release -p vdl-engine --example get
+cargo build --release -p gtf-engine --example get
 ./target/release/examples/get <url> <connections> <output-dir>
-# VDL_DEBUG=1 prints retries and connection-count changes
+# GTF_DEBUG=1 prints retries and connection-count changes
 ```
 
 Contributions of measurements from other networks are welcome. Please open a

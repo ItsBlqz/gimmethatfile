@@ -1,11 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use gtf_engine::{DownloadId, Manager, Settings, Snapshot, Status};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 use tauri::{Emitter, Manager as _, RunEvent, State};
 use tauri_plugin_dialog::DialogExt;
-use vdl_engine::{DownloadId, Manager, Settings, Snapshot, Status};
 
 struct App(Manager);
 
@@ -158,9 +158,9 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            // VIBE_DOWNLOADER_DATA_DIR lets developers run with a throwaway
+            // GIMMETHATFILE_DATA_DIR lets developers run with a throwaway
             // download list instead of their real one.
-            let data_dir = match std::env::var_os("VIBE_DOWNLOADER_DATA_DIR") {
+            let data_dir = match std::env::var_os("GIMMETHATFILE_DATA_DIR") {
                 Some(dir) => PathBuf::from(dir),
                 None => app.path().app_data_dir()?,
             };
@@ -201,7 +201,7 @@ fn main() {
             reveal,
         ])
         .build(tauri::generate_context!())
-        .expect("failed to start Vibe Downloader")
+        .expect("failed to start Gimme That File")
         .run(|app, event| {
             if let RunEvent::Exit = event {
                 app.state::<App>().0.shutdown();

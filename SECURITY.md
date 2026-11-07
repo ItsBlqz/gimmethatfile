@@ -27,5 +27,5 @@ Areas we especially care about:
 - Corrupted downloads reported as complete.
 - Anything that lets web content in the UI reach Tauri commands it shouldn't.
 
-Downloaded files themselves are untrusted. Vibe Downloader doesn't scan them,
+Downloaded files themselves are untrusted. Gimme That File doesn't scan them,
 so scan files from sources you don't trust.
