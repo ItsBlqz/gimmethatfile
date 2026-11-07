@@ -110,7 +110,11 @@ fn reveal(app: State<App>, id: DownloadId) -> Result<(), String> {
     if path.is_file() {
         reveal_path(&path)
     } else {
-        let dir = if path.is_dir() { path } else { path.parent().map(Path::to_path_buf).unwrap_or(path) };
+        let dir = if path.is_dir() {
+            path
+        } else {
+            path.parent().map(Path::to_path_buf).unwrap_or(path)
+        };
         open_path(&dir)
     }
 }
@@ -137,7 +141,12 @@ fn reveal_path(path: &Path) -> Result<(), String> {
     }
     #[cfg(target_os = "macos")]
     {
-        Command::new("open").arg("-R").arg(path).spawn().map(|_| ()).map_err(|e| e.to_string())
+        Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -149,7 +158,12 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let data_dir = app.path().app_data_dir()?;
+            // VIBE_DOWNLOADER_DATA_DIR lets developers run with a throwaway
+            // download list instead of their real one.
+            let data_dir = match std::env::var_os("VIBE_DOWNLOADER_DATA_DIR") {
+                Some(dir) => PathBuf::from(dir),
+                None => app.path().app_data_dir()?,
+            };
             std::fs::create_dir_all(&data_dir)?;
             let manager = tauri::async_runtime::block_on(async move {
                 Manager::load(data_dir.join("downloads.json"))

@@ -36,7 +36,12 @@ async fn serve(body: Arc<Vec<u8>>, ranges: bool, delay: Duration) -> SocketAddr 
     addr
 }
 
-async fn handle(s: TcpStream, body: Arc<Vec<u8>>, ranges: bool, delay: Duration) -> std::io::Result<()> {
+async fn handle(
+    s: TcpStream,
+    body: Arc<Vec<u8>>,
+    ranges: bool,
+    delay: Duration,
+) -> std::io::Result<()> {
     handle_with(s, body, ranges, delay, false).await
 }
 
@@ -61,7 +66,8 @@ async fn handle_with(
     let text = String::from_utf8_lossy(&req);
     let range = text.lines().find_map(|l| {
         let (k, v) = l.split_once(':')?;
-        k.eq_ignore_ascii_case("range").then(|| v.trim().to_string())
+        k.eq_ignore_ascii_case("range")
+            .then(|| v.trim().to_string())
     });
     let len = body.len() as u64;
     let range = range.filter(|r| !(full_on_zero && r.trim() == "bytes=0-"));
@@ -70,7 +76,11 @@ async fn handle_with(
             let r = r.trim_start_matches("bytes=");
             let (a, b) = r.split_once('-').unwrap();
             let a: u64 = a.parse().unwrap();
-            let b: u64 = if b.is_empty() { len - 1 } else { b.parse().unwrap() };
+            let b: u64 = if b.is_empty() {
+                len - 1
+            } else {
+                b.parse().unwrap()
+            };
             (a, (b + 1).min(len), true)
         }
         None => (0, len, false),
@@ -117,7 +127,12 @@ async fn wait_for(m: &Manager, id: u64, f: impl Fn(&Snapshot) -> bool) -> Snapsh
             return snap;
         }
         assert!(Instant::now() < deadline, "timed out, last state: {snap:?}");
-        assert_ne!(snap.status, Status::Failed, "download failed: {:?}", snap.error);
+        assert_ne!(
+            snap.status,
+            Status::Failed,
+            "download failed: {:?}",
+            snap.error
+        );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
@@ -150,7 +165,10 @@ async fn segmented_download_matches() {
     };
     assert!(snap.resumable);
     assert_eq!(snap.file_name.as_deref(), Some("test.bin"));
-    assert!(max_conns > 1, "expected parallel connections, saw {max_conns}");
+    assert!(
+        max_conns > 1,
+        "expected parallel connections, saw {max_conns}"
+    );
     assert_eq!(read_result(tmp.path(), &snap), *body);
 }
 
@@ -184,7 +202,10 @@ async fn pause_resume_and_restart() {
 
         // Resume, then simulate the app closing mid-download.
         m.resume(id);
-        wait_for(&m, id, |s| s.downloaded > paused.downloaded + 2 * 1024 * 1024).await;
+        wait_for(&m, id, |s| {
+            s.downloaded > paused.downloaded + 2 * 1024 * 1024
+        })
+        .await;
         m.shutdown();
         id
     };
@@ -208,7 +229,9 @@ async fn not_found_fails_cleanly() {
             let mut b = [0u8; 1024];
             let _ = s.read(&mut b).await;
             let _ = s
-                .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .write_all(
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
                 .await;
         }
     });
@@ -261,10 +284,16 @@ async fn adapts_to_connection_limits() {
         });
     }
     let m = manager(tmp.path());
-    let id = m.add(&format!("http://{addr}/limited.bin"), None, Some(12)).unwrap();
+    let id = m
+        .add(&format!("http://{addr}/limited.bin"), None, Some(12))
+        .unwrap();
     let snap = wait_for(&m, id, |s| s.status == Status::Completed).await;
     assert_eq!(read_result(tmp.path(), &snap), *body);
-    assert_eq!(peak.load(Ordering::SeqCst), 3, "should have used the 3 allowed connections");
+    assert_eq!(
+        peak.load(Ordering::SeqCst),
+        3,
+        "should have used the 3 allowed connections"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -286,7 +315,9 @@ async fn accepts_full_reply_to_open_range_at_zero() {
         });
     }
     let m = manager(tmp.path());
-    let id = m.add(&format!("http://{addr}/movie.mkv"), None, Some(8)).unwrap();
+    let id = m
+        .add(&format!("http://{addr}/movie.mkv"), None, Some(8))
+        .unwrap();
     let snap = wait_for(&m, id, |s| s.status == Status::Completed).await;
     assert!(snap.resumable);
     assert_eq!(read_result(tmp.path(), &snap), *body);

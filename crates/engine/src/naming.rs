@@ -28,7 +28,7 @@ pub fn from_content_disposition(value: &str) -> Option<String> {
 }
 
 pub fn from_url(url: &Url) -> Option<String> {
-    let last = url.path_segments()?.filter(|s| !s.is_empty()).last()?;
+    let last = url.path_segments()?.rev().find(|s| !s.is_empty())?;
     let decoded = percent_decode_str(last).decode_utf8_lossy().into_owned();
     (!decoded.trim().is_empty()).then_some(decoded)
 }
@@ -51,8 +51,8 @@ pub fn sanitize(name: &str) -> String {
     }
     let stem = s.split('.').next().unwrap_or("").to_ascii_uppercase();
     const RESERVED: &[&str] = &[
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
     if RESERVED.contains(&stem.as_str()) {
         s.insert(0, '_');
@@ -111,6 +111,31 @@ mod tests {
         let u = Url::parse("https://x.com/files/my%20file.iso?token=1").unwrap();
         assert_eq!(from_url(&u).as_deref(), Some("my file.iso"));
         assert_eq!(from_url(&Url::parse("https://x.com/").unwrap()), None);
+    }
+
+    #[test]
+    fn no_path_traversal() {
+        // A hostile server must not be able to write outside the chosen folder.
+        for evil in [
+            "../../evil.exe",
+            r"..\..\evil.exe",
+            "/etc/passwd",
+            r"C:\Windows\x.dll",
+            "..",
+        ] {
+            let name = sanitize(evil);
+            assert!(
+                !name.contains('/') && !name.contains('\\') && !name.contains(':'),
+                "{name}"
+            );
+            assert_ne!(name, "..");
+        }
+        assert_eq!(
+            from_content_disposition(r#"attachment; filename="../../evil.exe""#)
+                .map(|n| sanitize(&n))
+                .as_deref(),
+            Some(".._.._evil.exe")
+        );
     }
 
     #[test]

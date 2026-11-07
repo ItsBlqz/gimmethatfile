@@ -79,7 +79,10 @@ impl State {
         self.entries.iter().any(|e| {
             e.rec.id != except
                 && e.rec.dir == dir
-                && e.rec.file_name.as_deref().is_some_and(|n| same_name(n, name))
+                && e.rec
+                    .file_name
+                    .as_deref()
+                    .is_some_and(|n| same_name(n, name))
         })
     }
 }
@@ -209,7 +212,8 @@ impl Manager {
     }
 
     pub fn pause_all(&self) {
-        let ids = self.ids_where(|s| matches!(s, Status::Queued | Status::Connecting | Status::Downloading));
+        let ids = self
+            .ids_where(|s| matches!(s, Status::Queued | Status::Connecting | Status::Downloading));
         ids.into_iter().for_each(|id| self.pause(id));
     }
 
@@ -299,7 +303,12 @@ impl Manager {
     }
 
     pub fn has_active(&self) -> bool {
-        self.inner.state.lock().entries.iter().any(|e| e.job.is_some())
+        self.inner
+            .state
+            .lock()
+            .entries
+            .iter()
+            .any(|e| e.job.is_some())
     }
 
     pub fn snapshot(&self) -> Vec<Snapshot> {
@@ -315,7 +324,12 @@ impl Manager {
                         j.speed.lock().value,
                         j.workers.load(Relaxed),
                     ),
-                    Some(j) => (r.downloaded, r.segments.clone(), 0.0, j.workers.load(Relaxed)),
+                    Some(j) => (
+                        r.downloaded,
+                        r.segments.clone(),
+                        0.0,
+                        j.workers.load(Relaxed),
+                    ),
                     None => (r.downloaded, r.segments.clone(), 0.0, 0),
                 };
                 let eta = match r.total {
@@ -374,7 +388,10 @@ impl Inner {
 
     fn record(&self, id: DownloadId) -> Option<DownloadRecord> {
         let st = self.state.lock();
-        st.entries.iter().find(|e| e.rec.id == id).map(|e| e.rec.clone())
+        st.entries
+            .iter()
+            .find(|e| e.rec.id == id)
+            .map(|e| e.rec.clone())
     }
 
     fn save(&self) {
@@ -401,7 +418,9 @@ impl Inner {
                 next_id: st.next_id,
             }
         };
-        let Ok(json) = serde_json::to_vec_pretty(&data) else { return };
+        let Ok(json) = serde_json::to_vec_pretty(&data) else {
+            return;
+        };
         if let Some(parent) = self.store.parent() {
             let _ = fs::create_dir_all(parent);
         }
@@ -460,7 +479,7 @@ impl Inner {
                     any
                 };
                 // Persist resume points every few seconds while downloading.
-                if any && tick % 6 == 0 {
+                if any && tick.is_multiple_of(6) {
                     inner.save();
                 }
             }
@@ -558,13 +577,18 @@ impl Inner {
                 (Some(a), Some(b)) => a == b,
                 _ => true,
             }
-            && rec.file_name.as_deref().is_some_and(|n| part_of(n).exists());
+            && rec
+                .file_name
+                .as_deref()
+                .is_some_and(|n| part_of(n).exists());
 
         let file_name = {
             let mut st = self.state.lock();
             let name = match &rec.file_name {
                 Some(n) => n.clone(),
-                None => naming::unique(&rec.dir, &info.file_name, |c| st.name_taken(&rec.dir, c, id)),
+                None => naming::unique(&rec.dir, &info.file_name, |c| {
+                    st.name_taken(&rec.dir, c, id)
+                }),
             };
             let Some(e) = st.get_mut(id) else {
                 return Err(Cancelled.into());
@@ -615,12 +639,23 @@ impl Inner {
         self.save();
 
         if ranged {
-            job::download_ranged(self.client.clone(), rec.url.clone(), file.clone(), job.clone(), connections)
-                .await?;
+            job::download_ranged(
+                self.client.clone(),
+                rec.url.clone(),
+                file.clone(),
+                job.clone(),
+                connections,
+            )
+            .await?;
             fsutil::set_sparse(&file, false);
         } else {
-            job::download_single(self.client.clone(), rec.url.clone(), file.clone(), job.clone())
-                .await?;
+            job::download_single(
+                self.client.clone(),
+                rec.url.clone(),
+                file.clone(),
+                job.clone(),
+            )
+            .await?;
         }
         file.sync_all().ok();
         drop(file);

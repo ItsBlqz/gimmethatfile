@@ -1,0 +1,77 @@
+name: Release
+
+# Push a tag like v0.2.0 to build and create a *draft* GitHub release.
+# Run manually (workflow_dispatch) to build the artifacts without releasing.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Read version
+        id: version
+        shell: bash
+        run: |
+          v=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="vibe-downloader") | .version')
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$v" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the version in Cargo.toml ($v)"
+            exit 1
+          fi
+
+      - name: Test
+        run: cargo test -p vdl-engine
+
+      - name: Build installer
+        working-directory: app
+        run: npx --yes @tauri-apps/cli@2 build
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          v=${{ steps.version.outputs.version }}
+          mkdir dist
+          cp "target/release/bundle/nsis/Vibe Downloader_${v}_x64-setup.exe" "dist/VibeDownloader-${v}-x64-setup.exe"
+          cp target/release/vibe-downloader.exe "dist/VibeDownloader-${v}-x64-portable.exe"
+          cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VibeDownloader-${{ steps.version.outputs.version }}-windows
+          path: dist/*
+
+      - name: Create draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=${{ steps.version.outputs.version }}
+          # Release notes = this version's section of CHANGELOG.md
+          awk -v v="$v" '
+            $0 ~ "^## \\[" v "\\]" { on=1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          cat >> notes.md <<'EOF'
+
+          ---
+          **Windows:** download `VibeDownloader-*-x64-setup.exe` (installer) or `*-portable.exe` (no install).
+          The app isn't code-signed yet, so Windows SmartScreen may warn you: click **More info → Run anyway**.
+          Verify downloads with `SHA256SUMS.txt`.
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/* --draft --title "Vibe Downloader $GITHUB_REF_NAME" --notes-file notes.md

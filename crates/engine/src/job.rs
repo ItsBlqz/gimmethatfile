@@ -43,7 +43,7 @@ const STALL_TIMEOUT: Duration = Duration::from_secs(120);
 const SPAWN_GAP: Duration = Duration::from_millis(150);
 /// Connections opened right away; more are added every `RAMP_EVERY`.
 const SLOW_START: u32 = 4;
-const RAMP_EVERY: Duration = Duration::from_millis(800);
+const RAMP_EVERY: Duration = Duration::from_millis(300);
 /// Quiet time without throttling before trying one more connection.
 const RAISE_AFTER: Duration = Duration::from_secs(15);
 
@@ -305,7 +305,9 @@ pub fn initial_ranges(total: u64, connections: u32) -> Vec<Range> {
     if total == 0 {
         return vec![];
     }
-    let n = (connections.max(1) as u64).min(total.div_ceil(MIN_SPLIT)).max(1);
+    let n = (connections.max(1) as u64)
+        .min(total.div_ceil(MIN_SPLIT))
+        .max(1);
     let size = total / n;
     (0..n)
         .map(|i| Range {
@@ -436,7 +438,9 @@ pub async fn download_ranged(
         if done > progress.0 {
             progress = (done, now);
         } else if now.duration_since(progress.1) > STALL_TIMEOUT {
-            break Err(last_err.take().unwrap_or_else(|| anyhow!("download stalled")));
+            break Err(last_err
+                .take()
+                .unwrap_or_else(|| anyhow!("download stalled")));
         }
 
         let target = job.target.load(Relaxed);
@@ -451,7 +455,8 @@ pub async fn download_ranged(
             debug!("raising connection target to {}", target + 1);
         }
 
-        if (set.len() as u32) < job.target.load(Relaxed) && now >= next_spawn && job.has_claimable() {
+        if (set.len() as u32) < job.target.load(Relaxed) && now >= next_spawn && job.has_claimable()
+        {
             set.spawn(worker(ctx.clone()));
             next_spawn = now + SPAWN_GAP;
         }
@@ -496,7 +501,10 @@ async fn fetch_segment(ctx: &Ctx, seg: &Arc<Segment>) -> anyhow::Result<bool> {
         }
         let res = fetch_once(ctx, seg, pos, end).await;
         if let Err(FetchErr::Retry(e) | FetchErr::Throttled(e) | FetchErr::Fatal(e)) = &res {
-            debug!("segment @{pos}: {e:#} (moved {} bytes)", seg.range().0 - pos);
+            debug!(
+                "segment @{pos}: {e:#} (moved {} bytes)",
+                seg.range().0 - pos
+            );
         }
         match res {
             Ok(FetchOk::Done) => return Ok(true),
@@ -514,7 +522,9 @@ async fn fetch_segment(ctx: &Ctx, seg: &Arc<Segment>) -> anyhow::Result<bool> {
                 // The server doesn't want this many connections. Step back and
                 // let the remaining workers pick up the segment later.
                 let workers = ctx.job.workers.load(Relaxed);
-                ctx.job.target.fetch_min(workers.saturating_sub(1).max(1), Relaxed);
+                ctx.job
+                    .target
+                    .fetch_min(workers.saturating_sub(1).max(1), Relaxed);
                 *ctx.job.last_throttle.lock() = Some(Instant::now());
                 seg.release();
                 return Ok(false);
@@ -564,7 +574,12 @@ fn classify(status: StatusCode) -> FetchErr {
     }
 }
 
-async fn fetch_once(ctx: &Ctx, seg: &Arc<Segment>, pos: u64, end: u64) -> Result<FetchOk, FetchErr> {
+async fn fetch_once(
+    ctx: &Ctx,
+    seg: &Arc<Segment>,
+    pos: u64,
+    end: u64,
+) -> Result<FetchOk, FetchErr> {
     let req = ctx
         .client
         .get(&ctx.url)
@@ -585,12 +600,14 @@ async fn fetch_once(ctx: &Ctx, seg: &Arc<Segment>, pos: u64, end: u64) -> Result
     if !usable {
         return Err(classify(status));
     }
-    let start = (status == StatusCode::PARTIAL_CONTENT).then(|| resp
-        .headers()
-        .get(header::CONTENT_RANGE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(parse_range_start))
-    .flatten();
+    let start = (status == StatusCode::PARTIAL_CONTENT)
+        .then(|| {
+            resp.headers()
+                .get(header::CONTENT_RANGE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(parse_range_start)
+        })
+        .flatten();
     if start.is_some_and(|s| s != pos) {
         return Err(FetchErr::Retry(anyhow!("server returned the wrong range")));
     }
@@ -736,7 +753,13 @@ mod tests {
     #[test]
     fn steals_back_half() {
         let job = Job::new();
-        job.init(vec![Range { pos: 0, end: 8 * MIN_SPLIT }], Some(8 * MIN_SPLIT));
+        job.init(
+            vec![Range {
+                pos: 0,
+                end: 8 * MIN_SPLIT,
+            }],
+            Some(8 * MIN_SPLIT),
+        );
         let a = job.claim().unwrap();
         let b = job.claim().unwrap();
         assert_eq!(a.range(), (0, 4 * MIN_SPLIT));

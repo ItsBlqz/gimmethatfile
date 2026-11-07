@@ -32,12 +32,19 @@ pub async fn probe(client: &Client, url: &str) -> Result<ProbeInfo> {
     };
 
     let (total, resumable) = if status == StatusCode::PARTIAL_CONTENT {
-        match get(header::CONTENT_RANGE).as_deref().and_then(parse_range_total) {
+        match get(header::CONTENT_RANGE)
+            .as_deref()
+            .and_then(parse_range_total)
+        {
             Some(t) => (Some(t), true),
             None => (None, false),
         }
     } else if status.is_success() {
-        (resp.content_length().filter(|_| get(header::CONTENT_LENGTH).is_some()), false)
+        (
+            resp.content_length()
+                .filter(|_| get(header::CONTENT_LENGTH).is_some()),
+            false,
+        )
     } else if status == StatusCode::RANGE_NOT_SATISFIABLE {
         // Usually an empty file.
         (Some(0), false)
