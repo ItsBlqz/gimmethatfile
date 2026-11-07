@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vibe Downloader</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 1024 1024" class="logo" aria-hidden="true">
+        <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c6cff"/><stop offset="1" stop-color="#3b82f6"/></linearGradient></defs>
+        <rect x="64" y="64" width="896" height="896" rx="216" fill="url(#lg)"/>
+        <path d="M512 250v380M352 480l160 160 160-160" fill="none" stroke="#fff" stroke-width="84" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M320 770h384" stroke="#fff" stroke-width="84" stroke-linecap="round" opacity=".85"/>
+      </svg>
+      <span>Vibe Downloader</span>
+    </div>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-filter="all">All <span class="count" id="count-all"></span></button>
+      <button class="tab" data-filter="active">Active <span class="count" id="count-active"></span></button>
+      <button class="tab" data-filter="done">Completed <span class="count" id="count-done"></span></button>
+    </nav>
+
+    <div class="actions">
+      <button class="icon-btn" id="btn-settings" title="Settings">
+        <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+      </button>
+      <button class="btn primary" id="btn-add">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        Add download
+      </button>
+    </div>
+  </header>
+
+  <main id="list" class="list"></main>
+
+  <section id="empty" class="empty hidden">
+    <div class="empty-art">
+      <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+    </div>
+    <h2>Nothing downloading yet</h2>
+    <p>Paste a link anywhere (<kbd>Ctrl</kbd>+<kbd>V</kbd>), drop one onto this window, or</p>
+    <button class="btn primary" id="btn-add-empty">Add a download</button>
+  </section>
+
+  <footer class="statusbar">
+    <div class="stats">
+      <span class="speed-total" id="speed-total">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg>
+        <b id="speed-value">0 B/s</b>
+      </span>
+      <span id="summary" class="muted"></span>
+    </div>
+    <div class="bulk">
+      <button class="link-btn" id="btn-pause-all">Pause all</button>
+      <button class="link-btn" id="btn-resume-all">Resume all</button>
+      <button class="link-btn" id="btn-clear">Clear completed</button>
+    </div>
+  </footer>
+
+  <div id="drop-hint" class="drop-hint hidden"><div>Drop links to download</div></div>
+
+  <!-- Add download -->
+  <dialog id="dlg-add" class="modal">
+    <form method="dialog" id="form-add">
+      <h3>Add downloads</h3>
+      <label class="field">
+        <span>Links <em id="link-count" class="muted"></em></span>
+        <textarea id="add-urls" rows="5" placeholder="https://example.com/file.zip&#10;One link per line" spellcheck="false"></textarea>
+      </label>
+      <label class="field">
+        <span>Save to</span>
+        <div class="row">
+          <input id="add-dir" type="text" spellcheck="false" />
+          <button type="button" class="btn" id="add-browse">Browse…</button>
+        </div>
+      </label>
+      <label class="field">
+        <span>Connections per file</span>
+        <select id="add-conns"></select>
+      </label>
+      <p class="error-text hidden" id="add-error"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="add-submit">Download</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Settings -->
+  <dialog id="dlg-settings" class="modal">
+    <form method="dialog" id="form-settings">
+      <h3>Settings</h3>
+      <label class="field">
+        <span>Default download folder</span>
+        <div class="row">
+          <input id="set-dir" type="text" spellcheck="false" />
+          <button type="button" class="btn" id="set-browse">Browse…</button>
+        </div>
+      </label>
+      <div class="grid2">
+        <label class="field">
+          <span>Simultaneous downloads</span>
+          <select id="set-max"></select>
+        </label>
+        <label class="field">
+          <span>Connections per file</span>
+          <select id="set-conns"></select>
+        </label>
+      </div>
+      <p class="hint">More connections usually means more speed, up to what your line and the server allow. 8 is a good default; some servers limit you to fewer.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Remove -->
+  <dialog id="dlg-remove" class="modal small">
+    <form method="dialog" id="form-remove">
+      <h3>Remove download?</h3>
+      <p class="muted" id="remove-name"></p>
+      <label class="check">
+        <input type="checkbox" id="remove-delete" />
+        <span>Also delete the file from disk</span>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn danger">Remove</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toasts" class="toasts"></div>
+
+  <template id="tpl-row">
+    <article class="item">
+      <div class="badge"></div>
+      <div class="body">
+        <div class="line1">
+          <span class="name"></span>
+          <span class="pct"></span>
+        </div>
+        <div class="bar"><div class="fill"></div><div class="gaps"></div></div>
+        <div class="line2">
+          <span class="meta"></span>
+          <span class="conns"></span>
+        </div>
+      </div>
+      <div class="row-actions">
+        <button class="icon-btn act-toggle"></button>
+        <button class="icon-btn act-folder" title="Show in folder">
+          <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+        </button>
+        <button class="icon-btn act-remove" title="Remove">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+    </article>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
