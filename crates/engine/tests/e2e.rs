@@ -36,7 +36,19 @@ async fn serve(body: Arc<Vec<u8>>, ranges: bool, delay: Duration) -> SocketAddr 
     addr
 }
 
-async fn handle(mut s: TcpStream, body: Arc<Vec<u8>>, ranges: bool, delay: Duration) -> std::io::Result<()> {
+async fn handle(s: TcpStream, body: Arc<Vec<u8>>, ranges: bool, delay: Duration) -> std::io::Result<()> {
+    handle_with(s, body, ranges, delay, false).await
+}
+
+/// `full_on_zero`: answer `Range: bytes=0-` with a plain 200 (whole file), which
+/// RFC 9110 allows and many CDNs do.
+async fn handle_with(
+    mut s: TcpStream,
+    body: Arc<Vec<u8>>,
+    ranges: bool,
+    delay: Duration,
+    full_on_zero: bool,
+) -> std::io::Result<()> {
     let mut req = Vec::new();
     let mut tmp = [0u8; 2048];
     while !req.windows(4).any(|w| w == b"\r\n\r\n") {
@@ -52,6 +64,7 @@ async fn handle(mut s: TcpStream, body: Arc<Vec<u8>>, ranges: bool, delay: Durat
         k.eq_ignore_ascii_case("range").then(|| v.trim().to_string())
     });
     let len = body.len() as u64;
+    let range = range.filter(|r| !(full_on_zero && r.trim() == "bytes=0-"));
     let (start, end, partial) = match range.filter(|_| ranges) {
         Some(r) => {
             let r = r.trim_start_matches("bytes=");
@@ -252,4 +265,29 @@ async fn adapts_to_connection_limits() {
     let snap = wait_for(&m, id, |s| s.status == Status::Completed).await;
     assert_eq!(read_result(tmp.path(), &snap), *body);
     assert_eq!(peak.load(Ordering::SeqCst), 3, "should have used the 3 allowed connections");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn accepts_full_reply_to_open_range_at_zero() {
+    let tmp = tempfile::tempdir().unwrap();
+    let body = data(10 * 1024 * 1024 + 123);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    {
+        let body = body.clone();
+        tokio::spawn(async move {
+            loop {
+                let (sock, _) = listener.accept().await.unwrap();
+                let body = body.clone();
+                tokio::spawn(async move {
+                    let _ = handle_with(sock, body, true, Duration::from_micros(300), true).await;
+                });
+            }
+        });
+    }
+    let m = manager(tmp.path());
+    let id = m.add(&format!("http://{addr}/movie.mkv"), None, Some(8)).unwrap();
+    let snap = wait_for(&m, id, |s| s.status == Status::Completed).await;
+    assert!(snap.resumable);
+    assert_eq!(read_result(tmp.path(), &snap), *body);
 }

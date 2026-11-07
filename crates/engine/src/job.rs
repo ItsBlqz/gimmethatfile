@@ -553,7 +553,11 @@ async fn fetch_segment(ctx: &Ctx, seg: &Arc<Segment>) -> anyhow::Result<bool> {
 fn classify(status: StatusCode) -> FetchErr {
     let e = anyhow!("server responded with {status}");
     match status.as_u16() {
-        200 => FetchErr::Fatal(anyhow!("server stopped honoring range requests")),
+        // A full-file reply to a mid-file range usually means the server is
+        // overloaded or limiting connections; back off rather than give up.
+        200 => FetchErr::Throttled(anyhow!(
+            "server ignored the range request and sent the whole file"
+        )),
         401 | 404 | 410 | 416 => FetchErr::Fatal(e),
         403 | 429 | 503 => FetchErr::Throttled(e),
         _ => FetchErr::Retry(e),
@@ -574,14 +578,19 @@ async fn fetch_once(ctx: &Ctx, seg: &Arc<Segment>, pos: u64, end: u64) -> Result
         r = req.send() => r.map_err(|e| FetchErr::Retry(e.into()))?,
     };
     let status = resp.status();
-    if status != StatusCode::PARTIAL_CONTENT {
+    // `bytes=0-` asks for the entire file, and servers may legally answer
+    // that with a plain 200. The body then starts at offset 0, which is
+    // exactly what we want.
+    let usable = status == StatusCode::PARTIAL_CONTENT || (status == StatusCode::OK && pos == 0);
+    if !usable {
         return Err(classify(status));
     }
-    let start = resp
+    let start = (status == StatusCode::PARTIAL_CONTENT).then(|| resp
         .headers()
         .get(header::CONTENT_RANGE)
         .and_then(|v| v.to_str().ok())
-        .and_then(parse_range_start);
+        .and_then(parse_range_start))
+    .flatten();
     if start.is_some_and(|s| s != pos) {
         return Err(FetchErr::Retry(anyhow!("server returned the wrong range")));
     }
