@@ -48,6 +48,8 @@ tested on Linux; you can [build from source](#building-from-source).
 - **Pause and resume**, even after closing the app or a crash. If the file
   changes on the server, the app notices and restarts it.
 - **Queue**: choose how many downloads run at once.
+- **Lives in the tray**: closing the window keeps downloads running. Quit from
+  the tray icon.
 - **Safe by default**: downloads go to `name.ext.gtfpart` and are renamed only
   when complete. Existing files are never overwritten, and file names from
   servers are sanitized.
@@ -134,15 +136,8 @@ docs/               Architecture and benchmarks
 
 ## Roadmap
 
-- [ ] Throughput-aware connection count (stop adding connections once they no longer help)
-- [ ] Browser extension that sends downloads to the app
-- [ ] Global and per-download speed limits
-- [ ] Tray icon and notifications when a download finishes
-- [ ] Auto-update
-- [ ] Optional checksum (SHA-256) verification
-- [ ] Scheduler (start and stop at set times)
-- [ ] macOS and Linux release builds
-
+Next up: browser download capture, throughput-aware connection count, speed
+limits, notifications and auto-update. The full list is in [TODO.md](TODO.md).
 Ideas and votes are welcome in [issues](https://github.com/ItsBlqz/gimmethatfile/issues).
 
 ## Contributing

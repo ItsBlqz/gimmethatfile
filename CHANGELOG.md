@@ -22,6 +22,8 @@ First release.
   (different size or ETag) is detected and restarted.
 - Download queue with a configurable number of simultaneous downloads.
 - Single-connection fallback for servers without range support.
+- Tray icon: closing the window hides it and downloads keep running; quit from
+  the tray menu. Launching the app again shows the running window.
 - Clean, flat UI with a custom title bar and System/Light/Dark themes: paste links anywhere, drag links onto the window,
   per-connection segment map, speed and time left.
 - `GIMMETHATFILE_DATA_DIR` to use a separate download list, and `GTF_DEBUG=1`

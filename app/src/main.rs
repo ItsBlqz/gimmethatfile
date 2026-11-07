@@ -4,7 +4,9 @@ use gtf_engine::{DownloadId, Manager, Settings, Snapshot, Status};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
-use tauri::{Emitter, Manager as _, RunEvent, State};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager as _, RunEvent, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 
 struct App(Manager);
@@ -154,9 +156,97 @@ fn reveal_path(path: &Path) -> Result<(), String> {
     }
 }
 
+const TRAY_ID: &str = "main";
+
+/// Bring the main window back from the tray (or from being minimized).
+fn show_main(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+/// Tray icon with a small menu. Closing the window only hides it, so this
+/// menu's "Quit" is the way to actually exit.
+fn build_tray(app: &tauri::App) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "show", "Show Gimme That File", true, None::<&str>)?;
+    let pause_all = MenuItem::with_id(app, "pause_all", "Pause all", true, None::<&str>)?;
+    let resume_all = MenuItem::with_id(app, "resume_all", "Resume all", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &show,
+            &PredefinedMenuItem::separator(app)?,
+            &pause_all,
+            &resume_all,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
+    )?;
+
+    let mut tray = TrayIconBuilder::with_id(TRAY_ID)
+        .tooltip("Gimme That File")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => show_main(app),
+            "pause_all" => app.state::<App>().0.pause_all(),
+            "resume_all" => app.state::<App>().0.resume_all(),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+    Ok(())
+}
+
+/// "2 downloading · 12.4 MB/s" for the tray tooltip.
+fn tray_tooltip(snaps: &[Snapshot]) -> String {
+    let active: Vec<_> = snaps
+        .iter()
+        .filter(|s| s.status == Status::Downloading)
+        .collect();
+    if active.is_empty() {
+        return "Gimme That File".into();
+    }
+    let speed: f64 = active.iter().map(|s| s.speed).sum();
+    format!(
+        "Gimme That File
+{} downloading · {:.1} MB/s",
+        active.len(),
+        speed / 1_048_576.0
+    )
+}
+
 fn main() {
     tauri::Builder::default()
+        // Must be first: a second launch just shows the running instance
+        // (which may be hidden in the tray) instead of starting another one.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
+        .on_window_event(|window, event| {
+            // The close button hides to the tray; downloads keep running.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
             // GIMMETHATFILE_DATA_DIR lets developers run with a throwaway
             // download list instead of their real one.
@@ -169,6 +259,7 @@ fn main() {
                 Manager::load(data_dir.join("downloads.json"))
             })?;
             app.manage(App(manager.clone()));
+            build_tray(app)?;
 
             // Push live progress to the UI.
             let handle = app.handle().clone();
@@ -179,7 +270,11 @@ fn main() {
                     let version = manager.version();
                     if manager.has_active() || version != last_version {
                         last_version = version;
-                        let _ = handle.emit("downloads", manager.snapshot());
+                        let snaps = manager.snapshot();
+                        if let Some(tray) = handle.tray_by_id(TRAY_ID) {
+                            let _ = tray.set_tooltip(Some(tray_tooltip(&snaps)));
+                        }
+                        let _ = handle.emit("downloads", snaps);
                     }
                 }
             });
