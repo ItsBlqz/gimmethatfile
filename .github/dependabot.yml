@@ -12,3 +12,6 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      # Refs like @stable / @master are branches, not versions.
+      - dependency-name: dtolnay/rust-toolchain

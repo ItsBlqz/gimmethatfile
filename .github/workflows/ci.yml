@@ -49,7 +49,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.90
+      # Pinned via `toolchain` (not the action ref) so Dependabot doesn't "upgrade" it.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.90"
       - uses: Swatinem/rust-cache@v2
       - run: cargo check -p vdl-engine --all-targets
 

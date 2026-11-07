@@ -37,7 +37,8 @@ pub fn set_sparse(file: &File, sparse: bool) {
         use windows_sys::Win32::System::IO::DeviceIoControl;
 
         let input = FILE_SET_SPARSE_BUFFER {
-            SetSparse: sparse as u8,
+            // `.into()` works for both windows-sys 0.59 (u8) and 0.60+ (bool).
+            SetSparse: sparse.into(),
         };
         let mut returned = 0u32;
         DeviceIoControl(
