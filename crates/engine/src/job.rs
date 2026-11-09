@@ -6,7 +6,9 @@
 //! largest remaining segment, so all connections stay busy until the end
 //! (the trick IDM calls "dynamic segmentation").
 
+use crate::control::{Controller, Sample};
 use crate::fsutil::write_all_at;
+use crate::limit::RateLimiter;
 use crate::probe::parse_range_start;
 use crate::types::Range;
 use anyhow::anyhow;
@@ -41,11 +43,6 @@ const MAX_SEG_FAILURES: u32 = 6;
 const STALL_TIMEOUT: Duration = Duration::from_secs(120);
 /// Minimum gap between opening two connections (servers dislike bursts).
 const SPAWN_GAP: Duration = Duration::from_millis(150);
-/// Connections opened right away; more are added every `RAMP_EVERY`.
-const SLOW_START: u32 = 4;
-const RAMP_EVERY: Duration = Duration::from_millis(300);
-/// Quiet time without throttling before trying one more connection.
-const RAISE_AFTER: Duration = Duration::from_secs(15);
 
 #[derive(Debug)]
 pub struct Cancelled;
@@ -125,9 +122,16 @@ pub struct Job {
     /// Bytes safely written to disk.
     pub downloaded: AtomicU64,
     pub workers: AtomicU32,
-    /// How many connections we currently aim for (adapts to the server).
+    /// How many connections we currently aim for (see `control.rs`).
     target: AtomicU32,
-    last_throttle: Mutex<Option<Instant>>,
+    /// Times the server pushed back (429/503/...); read by the supervisor.
+    throttles: AtomicU32,
+    /// This download's own speed limit.
+    pub limit: RateLimiter,
+    /// Limit shared by all downloads (owned by the manager).
+    global_limit: Arc<RateLimiter>,
+    /// Total time connections spent waiting for a speed limiter, in ns.
+    limiter_wait_ns: AtomicU64,
     initialized: AtomicBool,
     segments: Mutex<Vec<Arc<Segment>>>,
     pub part_path: Mutex<Option<PathBuf>>,
@@ -136,7 +140,13 @@ pub struct Job {
 }
 
 impl Job {
+    #[allow(dead_code)] // the manager uses `with_global_limit`; kept for tests
     pub fn new() -> Arc<Self> {
+        Self::with_global_limit(Arc::new(RateLimiter::default()))
+    }
+
+    /// A job whose connections also obey `global` (shared with other jobs).
+    pub fn with_global_limit(global: Arc<RateLimiter>) -> Arc<Self> {
         Arc::new(Self {
             cancel: CancellationToken::new(),
             reason: AtomicU8::new(StopReason::None as u8),
@@ -144,7 +154,10 @@ impl Job {
             downloaded: AtomicU64::new(0),
             workers: AtomicU32::new(0),
             target: AtomicU32::new(1),
-            last_throttle: Mutex::new(None),
+            throttles: AtomicU32::new(0),
+            limit: RateLimiter::default(),
+            global_limit: global,
+            limiter_wait_ns: AtomicU64::new(0),
             initialized: AtomicBool::new(false),
             segments: Mutex::new(Vec::new()),
             part_path: Mutex::new(None),
@@ -257,6 +270,58 @@ impl Job {
         })
     }
 
+    /// Let `n` received bytes through the speed limits, sleeping as needed.
+    /// Returns false if `token` was cancelled while waiting.
+    async fn pace(&self, n: usize, token: &CancellationToken) -> bool {
+        if !self.limit.is_limited() && !self.global_limit.is_limited() {
+            return true;
+        }
+        let n = n as u64;
+        let limits = [&self.limit, &*self.global_limit];
+        let wait = crate::limit::acquire_all(&limits, n);
+        tokio::select! {
+            _ = token.cancelled() => false,
+            waited = wait => {
+                if !waited.is_zero() {
+                    self.limiter_wait_ns
+                        .fetch_add(waited.as_nanos() as u64, Relaxed);
+                }
+                true
+            }
+        }
+    }
+
+    /// `n` received bytes were thrown away (they overlapped another
+    /// segment). Don't count them as speed, and give them back to the
+    /// limiters so the limit applies to useful bytes.
+    fn discard(&self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let n = n as u64;
+        // They were added to `received` when they arrived, so no underflow.
+        self.received.fetch_sub(n, Relaxed);
+        self.limit.refund(n);
+        self.global_limit.refund(n);
+    }
+
+    /// More connections are open than the target: atomically take this one
+    /// off the count. The caller must then stop without decrementing again.
+    fn try_retire(&self) -> bool {
+        let target = self.target.load(Relaxed).max(1);
+        let mut w = self.workers.load(Relaxed);
+        while w > target {
+            match self
+                .workers
+                .compare_exchange_weak(w, w - 1, Relaxed, Relaxed)
+            {
+                Ok(_) => return true,
+                Err(now) => w = now,
+            }
+        }
+        false
+    }
+
     fn set_fatal(&self, e: &anyhow::Error) {
         self.fatal.lock().get_or_insert_with(|| format!("{e:#}"));
     }
@@ -337,6 +402,18 @@ enum FetchErr {
 enum FetchOk {
     Done,
     Cancelled,
+    /// Too many connections are open; this one closed (see `try_retire`).
+    Retired,
+}
+
+/// What a worker does after a segment.
+enum Next {
+    /// Claim more work.
+    More,
+    /// Stop (cancelled, throttled or fatal error).
+    Stop,
+    /// Stop; `try_retire` already took this worker off the count.
+    Retired,
 }
 
 impl Ctx {
@@ -366,6 +443,9 @@ impl Ctx {
                 return Ok(false);
             }
             if !self.job.extend(seg) {
+                // Whatever is left belongs to someone else's segment.
+                self.job.discard(buf.len());
+                buf.clear();
                 return Ok(true);
             }
             if buf.is_empty() {
@@ -378,8 +458,10 @@ impl Ctx {
 /// Download every remaining range using up to `connections` connections.
 ///
 /// A small supervisor loop keeps the right number of workers alive. The
-/// target adapts like TCP congestion control: when the server pushes back
-/// (429/503) we drop one connection; after a quiet period we try one more.
+/// number comes from [`Controller`]: it measures what adding or removing
+/// connections does to the total speed, backs off when the server pushes
+/// back (429/503), and uses few connections when a speed limit (not the
+/// network) is the bottleneck.
 pub async fn download_ranged(
     client: Client,
     url: String,
@@ -387,10 +469,8 @@ pub async fn download_ranged(
     job: Arc<Job>,
     connections: u32,
 ) -> anyhow::Result<()> {
-    let max = connections.max(1);
-    // Slow start: begin with a few connections and add more while the server
-    // is happy. Bursting many connections at once trips abuse protection.
-    job.target.store(max.min(SLOW_START), Relaxed);
+    let mut ctl = Controller::new(connections, Instant::now());
+    job.target.store(ctl.target(), Relaxed);
     job.release_all();
     let token = job.cancel.child_token();
     let ctx = Arc::new(Ctx {
@@ -405,7 +485,7 @@ pub async fn download_ranged(
     let mut last_err: Option<anyhow::Error> = None;
     let mut progress = (job.downloaded.load(Relaxed), Instant::now());
     let mut next_spawn = Instant::now();
-    let mut last_raise = Instant::now();
+    let mut throttles = 0;
     let mut tick = tokio::time::interval(SPAWN_GAP);
 
     let result = loop {
@@ -443,20 +523,22 @@ pub async fn download_ranged(
                 .unwrap_or_else(|| anyhow!("download stalled")));
         }
 
-        let target = job.target.load(Relaxed);
-        let throttled_at = *job.last_throttle.lock();
-        let (calm, every) = match throttled_at {
-            None => (true, RAMP_EVERY),
-            Some(t) => (t.elapsed() > RAISE_AFTER, RAISE_AFTER),
-        };
-        if target < max && calm && last_raise.elapsed() > every {
-            job.target.store(target + 1, Relaxed);
-            last_raise = now;
-            debug!("raising connection target to {}", target + 1);
+        // A worker that got a 429/503 already lowered `target`; tell the
+        // controller so it doesn't raise it again right away.
+        let t = job.throttles.load(Relaxed);
+        if t != throttles {
+            throttles = t;
+            ctl.on_throttle(now, job.target.load(Relaxed));
         }
+        let target = ctl.tick(Sample {
+            at: now,
+            bytes: job.received.load(Relaxed),
+            workers: job.workers.load(Relaxed),
+            limiter_wait: Duration::from_nanos(job.limiter_wait_ns.load(Relaxed)),
+        });
+        job.target.store(target, Relaxed);
 
-        if (set.len() as u32) < job.target.load(Relaxed) && now >= next_spawn && job.has_claimable()
-        {
+        if (set.len() as u32) < target && now >= next_spawn && job.has_claimable() {
             set.spawn(worker(ctx.clone()));
             next_spawn = now + SPAWN_GAP;
         }
@@ -476,28 +558,33 @@ async fn worker(ctx: Arc<Ctx>) -> anyhow::Result<()> {
         }
     }
     ctx.job.workers.fetch_add(1, Relaxed);
-    let _count = Count(&ctx.job.workers);
+    let count = Count(&ctx.job.workers);
 
     while !ctx.token.is_cancelled() {
         let Some(seg) = ctx.job.claim() else { break };
-        if !fetch_segment(&ctx, &seg).await? {
-            break;
+        match fetch_segment(&ctx, &seg).await? {
+            Next::More => {}
+            Next::Stop => break,
+            Next::Retired => {
+                // Already counted out by `try_retire`.
+                std::mem::forget(count);
+                break;
+            }
         }
     }
     Ok(())
 }
 
-/// Returns Ok(true) when the segment is finished and the worker may take more.
-async fn fetch_segment(ctx: &Ctx, seg: &Arc<Segment>) -> anyhow::Result<bool> {
+async fn fetch_segment(ctx: &Ctx, seg: &Arc<Segment>) -> anyhow::Result<Next> {
     let mut failures = 0u32;
     loop {
         if ctx.token.is_cancelled() {
             seg.release();
-            return Ok(false);
+            return Ok(Next::Stop);
         }
         let (pos, end) = seg.range();
         if pos >= end {
-            return Ok(true);
+            return Ok(Next::More);
         }
         let res = fetch_once(ctx, seg, pos, end).await;
         if let Err(FetchErr::Retry(e) | FetchErr::Throttled(e) | FetchErr::Fatal(e)) = &res {
@@ -507,16 +594,20 @@ async fn fetch_segment(ctx: &Ctx, seg: &Arc<Segment>) -> anyhow::Result<bool> {
             );
         }
         match res {
-            Ok(FetchOk::Done) => return Ok(true),
+            Ok(FetchOk::Done) => return Ok(Next::More),
             Ok(FetchOk::Cancelled) => {
                 seg.release();
-                return Ok(false);
+                return Ok(Next::Stop);
+            }
+            Ok(FetchOk::Retired) => {
+                seg.release();
+                return Ok(Next::Retired);
             }
             Err(FetchErr::Fatal(e)) => {
                 seg.release();
                 ctx.job.set_fatal(&e);
                 ctx.token.cancel();
-                return Ok(false);
+                return Ok(Next::Stop);
             }
             Err(FetchErr::Throttled(_)) if ctx.job.workers.load(Relaxed) > 1 => {
                 // The server doesn't want this many connections. Step back and
@@ -525,9 +616,9 @@ async fn fetch_segment(ctx: &Ctx, seg: &Arc<Segment>) -> anyhow::Result<bool> {
                 ctx.job
                     .target
                     .fetch_min(workers.saturating_sub(1).max(1), Relaxed);
-                *ctx.job.last_throttle.lock() = Some(Instant::now());
+                ctx.job.throttles.fetch_add(1, Relaxed);
                 seg.release();
-                return Ok(false);
+                return Ok(Next::Stop);
             }
             Err(err @ (FetchErr::Throttled(_) | FetchErr::Retry(_))) => {
                 let (throttled, e) = match err {
@@ -551,7 +642,7 @@ async fn fetch_segment(ctx: &Ctx, seg: &Arc<Segment>) -> anyhow::Result<bool> {
                 tokio::select! {
                     _ = ctx.token.cancelled() => {
                         seg.release();
-                        return Ok(false);
+                        return Ok(Next::Stop);
                     }
                     _ = sleep(wait) => {}
                 }
@@ -626,10 +717,24 @@ async fn fetch_once(
             Ok(Some(bytes)) => {
                 ctx.job.received.fetch_add(bytes.len() as u64, Relaxed);
                 buf.extend_from_slice(&bytes);
-                if buf.len() >= BUF_SIZE || last_flush.elapsed() >= FLUSH_EVERY {
+                if !ctx.job.pace(bytes.len(), &ctx.token).await {
+                    ctx.commit(seg, &mut buf)?;
+                    return Ok(FetchOk::Cancelled);
+                }
+                // Reached the end of the segment (possibly shortened by a
+                // steal): commit now instead of reading on into bytes that
+                // would be thrown away (and would count against a limit).
+                let (pos, end) = seg.range();
+                let at_end = pos + buf.len() as u64 >= end;
+                if at_end || buf.len() >= BUF_SIZE || last_flush.elapsed() >= FLUSH_EVERY {
                     last_flush = Instant::now();
                     if ctx.commit_or_extend(seg, &mut buf)? {
                         return Ok(FetchOk::Done);
+                    }
+                    // Everything buffered is on disk now, so this is a
+                    // clean point to close if there are too many connections.
+                    if ctx.job.try_retire() {
+                        return Ok(FetchOk::Retired);
                     }
                 }
             }
@@ -714,6 +819,9 @@ async fn single_once(client: &Client, url: &str, file: &File, job: &Job) -> anyh
             Some(bytes) => {
                 job.received.fetch_add(bytes.len() as u64, Relaxed);
                 buf.extend_from_slice(&bytes);
+                if !job.pace(bytes.len(), &job.cancel).await {
+                    return Err(Cancelled.into());
+                }
                 if buf.len() >= BUF_SIZE || last_flush.elapsed() >= FLUSH_EVERY {
                     last_flush = Instant::now();
                     flush(&mut buf, &mut offset)?;

@@ -266,3 +266,37 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 /* ---------- Focus (keyboard only) ---------- */
 button:focus { outline: none; }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ---------- Speed limits ---------- */
+input[type="number"] {
+  width: 100%; height: 32px; font: inherit; color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; outline: none; user-select: text;
+  font-variant-numeric: tabular-nums;
+}
+.unit-input { position: relative; display: flex; align-items: center; }
+.unit-input input { padding-right: 56px; }
+.unit-input input::-webkit-inner-spin-button { margin-right: 2px; }
+.unit-input .unit { position: absolute; right: 30px; font-size: 12.5px; color: var(--muted); pointer-events: none; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: -6px; }
+.chip {
+  height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid var(--border);
+  background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
+}
+.chip:hover { color: var(--text); background: var(--hover); }
+.chip.active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta .lim { color: var(--accent); }
+
+.menu {
+  position: fixed; z-index: 40; min-width: 170px; padding: 4px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 9px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .14); animation: pop .1s ease-out;
+}
+.menu button {
+  display: flex; align-items: center; gap: 9px; width: 100%; height: 32px; padding: 0 10px;
+  border: 0; border-radius: 6px; background: transparent; color: var(--text);
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+}
+.menu button:hover, .menu button:focus-visible { background: var(--hover); outline: none; }
+.menu svg { width: 15px; height: 15px; color: var(--muted); }
+.act-more.open { background: var(--hover); color: var(--text); }

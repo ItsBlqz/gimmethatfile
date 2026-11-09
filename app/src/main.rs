@@ -83,6 +83,12 @@ fn remove(app: State<App>, id: DownloadId, delete_file: bool) {
     app.0.remove(id, delete_file)
 }
 
+/// Bytes/second; `None` (or 0) removes the limit.
+#[tauri::command]
+fn set_speed_limit(app: State<App>, id: DownloadId, limit: Option<u64>) {
+    app.0.set_speed_limit(id, limit)
+}
+
 #[tauri::command]
 fn clear_completed(app: State<App>) {
     app.0.clear_completed()
@@ -305,6 +311,7 @@ fn main() {
             pause_all,
             resume_all,
             remove,
+            set_speed_limit,
             clear_completed,
             get_settings,
             set_settings,

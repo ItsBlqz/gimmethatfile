@@ -1,4 +1,4 @@
-use gtf_engine::{Manager, Settings, Snapshot, Status};
+use gtf_engine::{AddOptions, Manager, Settings, Snapshot, Status};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -322,4 +322,173 @@ async fn accepts_full_reply_to_open_range_at_zero() {
     let snap = wait_for(&m, id, |s| s.status == Status::Completed).await;
     assert!(snap.resumable);
     assert_eq!(read_result(tmp.path(), &snap), *body);
+}
+
+/// Adds a download with `opts`; returns the seconds it took and its final state.
+async fn timed_download(m: &Manager, addr: SocketAddr, opts: AddOptions) -> (f64, Snapshot) {
+    let start = Instant::now();
+    let id = m
+        .add_with(&format!("http://{addr}/limited.bin"), opts)
+        .unwrap();
+    let snap = wait_for(m, id, |s| s.status == Status::Completed).await;
+    (start.elapsed().as_secs_f64(), snap)
+}
+
+fn assert_rate(len: usize, secs: f64, limit: f64) {
+    let rate = len as f64 / secs;
+    assert!(
+        (0.88 * limit..=1.08 * limit).contains(&rate),
+        "expected about {:.2} MB/s, got {:.2} MB/s",
+        limit / 1e6,
+        rate / 1e6
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn global_speed_limit_is_accurate() {
+    let tmp = tempfile::tempdir().unwrap();
+    let body = data(8 * 1024 * 1024);
+    let addr = serve(body.clone(), true, Duration::ZERO).await;
+    let m = manager(tmp.path());
+    let limit = 2_500_000u64;
+    m.set_settings(Settings {
+        speed_limit: Some(limit),
+        ..m.settings()
+    });
+    let (secs, snap) = timed_download(&m, addr, Default::default()).await;
+    assert_rate(body.len(), secs, limit as f64);
+    assert_eq!(read_result(tmp.path(), &snap), *body);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn per_download_limit_works_without_ranges() {
+    let tmp = tempfile::tempdir().unwrap();
+    let body = data(4 * 1024 * 1024);
+    let addr = serve(body.clone(), false, Duration::ZERO).await;
+    let m = manager(tmp.path());
+    let limit = 1_500_000u64;
+    let opts = AddOptions {
+        speed_limit: Some(limit),
+        ..Default::default()
+    };
+    let (secs, snap) = timed_download(&m, addr, opts).await;
+    assert!(!snap.resumable);
+    assert_eq!(snap.speed_limit, Some(limit));
+    assert_rate(body.len(), secs, limit as f64);
+    assert_eq!(read_result(tmp.path(), &snap), *body);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn per_download_limit_is_accurate() {
+    let tmp = tempfile::tempdir().unwrap();
+    let body = data(5 * 1024 * 1024);
+    let addr = serve(body.clone(), true, Duration::ZERO).await;
+    let m = manager(tmp.path());
+    let limit = 1_000_000u64;
+    let opts = AddOptions {
+        speed_limit: Some(limit),
+        ..Default::default()
+    };
+    let (secs, snap) = timed_download(&m, addr, opts).await;
+    assert!(snap.resumable);
+    assert_rate(body.len(), secs, limit as f64);
+    assert_eq!(read_result(tmp.path(), &snap), *body);
+}
+
+/// The stricter of the global and the per-download limit wins, and the
+/// global limit is shared by all downloads.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn limits_combine_and_are_shared() {
+    let tmp = tempfile::tempdir().unwrap();
+    let body = data(12 * 1024 * 1024);
+    let addr = serve(body.clone(), true, Duration::ZERO).await;
+    let m = manager(tmp.path());
+    m.set_settings(Settings {
+        speed_limit: Some(5_000_000),
+        ..m.settings()
+    });
+    let slow = AddOptions {
+        speed_limit: Some(2_000_000),
+        ..Default::default()
+    };
+    let start = Instant::now();
+    let a = m.add_with(&format!("http://{addr}/a.bin"), slow).unwrap();
+    let b = m.add(&format!("http://{addr}/b.bin"), None, None).unwrap();
+    // Together they get the global 5 MB/s, a at most 2 MB/s of it. (The
+    // global limit is shared per connection, so a may get a bit less.)
+    wait_for(&m, b, |s| s.status == Status::Completed).await;
+    let secs = start.elapsed().as_secs_f64();
+    let a_done = m
+        .snapshot()
+        .into_iter()
+        .find(|s| s.id == a)
+        .unwrap()
+        .downloaded;
+    assert_rate(body.len() + a_done as usize, secs, 5_000_000.0);
+    let a_rate = a_done as f64 / secs;
+    assert!(a_rate < 2_200_000.0, "a got {a_rate} B/s");
+    // Overall, a never beats its own limit.
+    let snap = wait_for(&m, a, |s| s.status == Status::Completed).await;
+    let a_rate = body.len() as f64 / start.elapsed().as_secs_f64();
+    assert!(a_rate < 2_160_000.0, "a got {a_rate} B/s");
+    assert_eq!(read_result(tmp.path(), &snap), *body);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn speed_limits_change_live() {
+    let tmp = tempfile::tempdir().unwrap();
+    let body = data(24 * 1024 * 1024);
+    let addr = serve(body.clone(), true, Duration::from_micros(100)).await;
+    let m = manager(tmp.path());
+    let opts = AddOptions {
+        speed_limit: Some(500_000),
+        ..Default::default()
+    };
+    let id = m
+        .add_with(&format!("http://{addr}/live.bin"), opts)
+        .unwrap();
+    wait_for(&m, id, |s| s.downloaded > 0).await;
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    // The limit holds, and the controller notices that the limit, not the
+    // network, is the bottleneck: few connections are enough.
+    let snap = m.snapshot().into_iter().find(|s| s.id == id).unwrap();
+    assert!(
+        snap.downloaded < 4 * 1024 * 1024,
+        "{} bytes in ~4 s at 0.5 MB/s",
+        snap.downloaded
+    );
+    assert!(snap.connections <= 2, "{} connections", snap.connections);
+
+    // Swap the per-download limit for a global one...
+    m.set_speed_limit(id, None);
+    m.set_settings(Settings {
+        speed_limit: Some(1_000_000),
+        ..m.settings()
+    });
+    let before = m.snapshot().into_iter().find(|s| s.id == id).unwrap();
+    assert_eq!(before.speed_limit, None);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let after = m.snapshot().into_iter().find(|s| s.id == id).unwrap();
+    let moved = after.downloaded - before.downloaded;
+    assert!(moved < 3 * 1024 * 1024, "{moved} bytes in 2 s at 1 MB/s");
+
+    // ...then lift it.
+    m.set_settings(Settings {
+        speed_limit: None,
+        ..m.settings()
+    });
+    let start = Instant::now();
+    let snap = wait_for(&m, id, |s| s.status == Status::Completed).await;
+    assert!(
+        start.elapsed() < Duration::from_secs(10),
+        "unlimited should finish quickly"
+    );
+    assert_eq!(read_result(tmp.path(), &snap), *body);
+
+    // The per-download limit is saved.
+    m.set_speed_limit(id, Some(123_456));
+    m.shutdown();
+    let m = Manager::load(tmp.path().join("state.json")).unwrap();
+    let snap = m.snapshot().into_iter().find(|s| s.id == id).unwrap();
+    assert_eq!(snap.speed_limit, Some(123_456));
 }
