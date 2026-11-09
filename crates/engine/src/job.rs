@@ -499,7 +499,10 @@ pub async fn download_ranged(
     job: Arc<Job>,
     connections: u32,
 ) -> anyhow::Result<()> {
-    let mut ctl = Controller::new(connections, Instant::now());
+    // GTF_ADAPTIVE_DOWN=1 turns on the experimental throughput-based
+    // reductions (off by default; see docs/BENCHMARKS.md).
+    let mut ctl = Controller::new(connections, Instant::now())
+        .with_adaptive_down(std::env::var_os("GTF_ADAPTIVE_DOWN").is_some());
     job.target.store(ctl.target(), Relaxed);
     job.release_all();
     let token = job.cancel.child_token();

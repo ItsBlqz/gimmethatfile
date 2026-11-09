@@ -11,10 +11,17 @@ items can also get an issue.
       4–9 s). Smaller splits near the end help in theory but didn't measurably
       change this. Ideas: race the slowest remaining segment on a second
       connection, or reuse the fastest connection.
-- [ ] **Adaptive connection count on real servers.** It fixes the simulated
-      "line already full" case (16 connections: 8.2 → 17.9 MB/s), but on the
-      real Debian mirror results were inconclusive (noise of ±30% between runs).
-      Needs more measurements across different servers, perhaps longer windows.
+- [ ] **Throughput-based connection count (experimental, off by default).**
+      It fixes the simulated "line already full" case (16 connections: 8.2 →
+      17.9 MB/s), but on kernel.org it misread noise and cut speed by more
+      than half, and on the Debian mirror it never backed off. Needs a more
+      robust signal (longer or repeated measurements, confidence intervals)
+      before it can be on by default. Try with `GTF_ADAPTIVE_DOWN=1`.
+- [ ] **~10% slower than the old engine on the Debian mirror** with the same
+      number of connections (4 of 4 interleaved pairs). Suspects: more
+      connections opened near the end (smaller tail splits), each going
+      through Debian's redirect. Could also resolve the redirect once and
+      reuse the final URL for segment requests.
 - [ ] **Clear stored cookies** from a download once it completes (they are kept
       in the local download list so resume works).
 - [ ] **Dev instance next to the installed app**: let a debug build with
@@ -40,8 +47,11 @@ items can also get an issue.
 ## Done
 
 - [x] Speed limits: global and per download (live, persisted, ⋯ row menu)
-- [x] Throughput-aware connection count (adds connections only while they
-      help; backs off on a saturated line; re-probes every 20 s)
+- [x] Connection controller: slow start, backing off on 429/503, and few
+      connections while a speed limit binds (throughput-based reductions are
+      experimental, see Next)
+- [x] Final benchmark on an idle machine plus an "under load" real-life run
+      (docs/BENCHMARKS.md)
 - [x] Browser download capture: Chrome/Edge extension, local receiver on
       127.0.0.1:47811 that only answers extensions, per-download cookies/headers
 - [x] Notifications when a download finishes or fails

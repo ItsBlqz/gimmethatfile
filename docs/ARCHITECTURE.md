@@ -109,8 +109,17 @@ flag. Workers are tokio tasks, each holding one HTTP connection.
 
 More connections help when the server or the path limits each connection.
 When one connection already fills the line, extra connections only add
-congestion and *lower* the speed (see [BENCHMARKS.md](BENCHMARKS.md)). The
-controller therefore measures and keeps a change only if it paid off:
+congestion and *lower* the speed (see [BENCHMARKS.md](BENCHMARKS.md)).
+
+**By default** the controller climbs to the configured maximum (slow start:
+4, then +1 every 300 ms) and only goes lower for the two signals described
+below: server push-back and a binding speed limit. Reducing connections
+based on measured throughput alone (steps 1–3) is **experimental and off**
+(`Controller::with_adaptive_down`, `GTF_ADAPTIVE_DOWN=1` for the CLI and
+benchmarks). It works in the reproducible benchmark, but on a real CDN
+(kernel.org, where each connection is individually slow) its 1–1.5 s
+measurements were noisy enough that it kept removing connections that
+helped, and downloads ran at less than half speed. With it switched on:
 
 1. **Climb.** Start with `min(4, max)` connections and add one every 300 ms.
    Every second, compare the last second with the one before: the added

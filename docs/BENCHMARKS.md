@@ -37,39 +37,31 @@ costs nothing measurable (8 connections: 9.5 s, 9.4 s before).
 
 The same benchmark can add a shared "line" that all connections together
 can't exceed, with a congestion penalty: with `n` connections open the line
-only delivers `line / (1 + penalty * (n - 1))`. This models what we measured
-on a Debian mirror (section 4): one connection fills the line and more
-connections make it slower.
+only delivers `line / (1 + penalty * (n - 1))`. This models what we see on the
+Debian mirror (section 4): one connection fills the line and more connections
+make it slower.
 
 ```sh
 cargo run --release -p gtf-engine --example bench -- 1000 256 20 0.1   # 20 MB/s line, penalty 0.1
+GTF_ADAPTIVE_DOWN=1 cargo run --release -p gtf-engine --example bench -- 1000 256 20 0.1
 ```
 
-"Avg. open" is the average number of open connections during the download.
-"Before" is the engine with a fixed slow start (4, then +1 every 300 ms up to
-the maximum) that it had until this change.
+"Avg. open" is the average number of open connections. "Default" is what the
+app does (slow start up to the maximum). "Experimental" turns on the
+throughput-based reductions (`GTF_ADAPTIVE_DOWN=1`), which are **off by
+default** because they misjudged a real CDN (section 4).
 
-| Max. connections | Before | Avg. open | Now | Avg. open |
+| Max. connections | Default | Avg. open | Experimental | Avg. open |
 |---:|---:|---:|---:|---:|
 | 1 | 18.9 MB/s | 1.0 | 18.9 MB/s | 1.0 |
-| 2 | 17.2 MB/s | 2.0 | 18.6 MB/s | 1.1 |
-| 4 | 14.6 MB/s | 3.9 | 18.0 MB/s | 1.5 |
-| 8 | 11.5 MB/s | 7.6 | 17.4 MB/s | 1.8 |
-| 16 | 8.2 MB/s | 14.6 | 17.5 MB/s | 1.7 |
+| 8 | 11.5 MB/s | 7.6 | 17.9 MB/s | 1.7 |
+| 16 | 8.2 MB/s | 14.8 | 17.9 MB/s | 1.7 |
 
-A middle case, where each connection is capped at 4 MB/s *and* the line is
-full at 20 MB/s (`-- 4 256 20 0.1`; the best here is 4 connections at
-15.4 MB/s):
-
-| Max. connections | Before | Avg. open | Now | Avg. open |
-|---:|---:|---:|---:|---:|
-| 1 | 3.8 MB/s | 1.0 | 3.8 MB/s | 1.0 |
-| 8 | 11.0 MB/s | 7.6 | 13.5 MB/s | 3.9 |
-| 16 | 7.9 MB/s | 14.6 | 13.4 MB/s | 3.9 |
-
-The remaining gap to the best case is the time spent finding it: the climb
-overshoots for a second or two, and every 20 s (backing off up to 160 s) a
-probe tries one step up or down.
+In this model the experimental controller does exactly what it should. The
+problem is real networks: their speed jumps around far more than this model,
+and the controller can't yet tell that noise from a real effect. Until it can,
+the practical advice for a server where one connection already fills your
+line is to set **Connections per file** to 1 or 2 for that download.
 
 ## 3. Engine overhead (local loopback, not internet speed)
 
@@ -86,60 +78,81 @@ real internet connection.
 
 ## 4. Real world
 
-These were measured on one home connection on Windows 11, in November 2026, with
-`examples/get.rs`, with the engine before the throughput-aware connection
-count. Every file's SHA-256 was checked: against the publisher's
-checksum where one exists (Debian), and otherwise against a `curl` download of the
-same file.
+All on one home connection (Windows 11, roughly 200 Mbit/s), with
+`examples/get.rs`. Runs are interleaved (rotating the order every round) so a
+change in the network affects every variant alike, and every downloaded file
+was checked against its known SHA-256 (Debian's published checksum, otherwise
+a `curl` download of the same file). Speeds are averages over the whole
+download, in MB/s. "Old" is the engine before the speed-limit and
+connection-count work (fixed slow start); "now" is the current default.
 
-| Source | 1 connection | 8 connections | 16 connections | Notes |
-|---|---:|---:|---:|---|
-| kernel.org (Fastly CDN), 145 MB | 5.3–5.5 MB/s | 6.3–8.5 MB/s | 5.8 MB/s | Helps moderately |
-| Hetzner speed test (Singapore), 100 MB | 3.8–5.6 MB/s | 5.3–6.3 MB/s | 5.5 MB/s | Allows ~2 connections per IP and answers the rest with `429`; the engine adapts |
-| Debian mirror (Sweden, via redirect), 756 MB | 24.9–26.6 MB/s | 9.5–20.2 MB/s | 21.6 MB/s | One connection already fills the line; more connections only add congestion |
+### Clean run (10 November 2026)
 
-Readings vary by 2x or more between runs of the same test, so treat them as
-indicative only.
+Machine otherwise idle: no game running, game launchers open in the
+background, about 0.2 MB/s of other traffic.
 
-### Debian mirror, with the throughput-aware connection count
-
-Measured on 10 November 2026 on the same connection, with
-`GTF_DEBUG=1 examples/get.rs`, runs interleaved, every file checked against
-Debian's SHA-256. "Before" is the engine with the fixed slow start.
-
-| Run | 1 connection | 8, before | 8, now |
+| Source | 1 connection | 8, now | 8, old |
 |---|---:|---:|---:|
-| 1 | 26.1 MB/s | 21.5 MB/s | 16.1 MB/s ¹ |
-| 2 | ~22.5 MB/s ² | ~21 MB/s ² | ~24 MB/s ¹ ² |
-| 3 | | | 19.7 MB/s |
+| kernel.org (Fastly CDN), 145 MB | 5.2, 4.0 | **6.85, 6.53, 6.70** | 6.00, 6.25, 6.54, 6.54, 6.12 |
+| Debian mirror (Sweden, via redirect), 756 MB | **24.8, 27.9** | 18.7, 20.2 | 20.2, 21.0, 21.3, 21.9 |
+| Hetzner speed test (Singapore), 100 MB | 5.4 | 5.6 | 5.6, 5.5 |
 
-¹ An earlier version of the controller, without the check after the climb.
-² Interrupted near the end (the test script was stopped to rebuild); the
-speed is the average up to that point.
+The experimental throughput-based controller (section 2), which was briefly
+the default, measured on the same evening:
 
-**This is inconclusive.** On this day the line behaved differently from the
-measurement above: 8 connections reached 32–37 MB/s for stretches, more than
-one connection ever did, so the premise ("one connection fills the line") did
-not hold. In run 3 the controller settled on 6 connections, tried 3 (−68%,
-reverted) and 7 (−22%, reverted); the averages are dominated by stalls and
-reconnects near the end of the downloads, not by the connection count. We
-stopped at about 4.5 GB of traffic. The reproducible scenario in section 2 is
-the better evidence that the controller does what it should; the real-world
-numbers mainly show it doesn't break anything on a fast mirror.
+| Source | 8, experimental | Avg. open |
+|---|---:|---:|
+| kernel.org | 2.7, 2.4, 2.2, 2.7, 5.3 | 3.5–4.5 (7.3 in the 5.3 run) |
+| Debian | 19.2, 19.7 | 7.5 |
+
+On kernel.org each connection is individually slow, so 8 connections help
+(+45% over one). The experimental controller "measured" that removing
+connections barely hurt, removed them, and lost more than half the speed;
+with the controller bypassed the same build ran at 6.5–6.7 MB/s. That is why
+it is off by default.
+
+### Real life: under load (9–10 November 2026)
+
+The same kind of runs, measured while the machine was under heavy CPU load
+and an online game (GTA Online) was using the network at the same time, which
+is how a download manager often gets used.
+
+| Source | 1 connection | 8, old | 8, experimental |
+|---|---:|---:|---:|
+| Debian mirror, 756 MB | 26.1, ~22.5 ¹ | 21.5, ~21 ¹ | 16.1, ~24 ¹, 19.7 |
+
+¹ Interrupted near the end; the speed is the average up to that point.
+
+Under load the numbers spread more (16–24 MB/s for the same configuration),
+but the picture is the same as on the idle machine: on this mirror one
+connection is fastest, and the bottleneck is the line and the mirror, not the
+PC. Within single runs, 8 connections reached 32–37 MB/s for stretches, so
+which configuration wins also depends on the moment.
+
+### First measurements (8 November 2026, first engine version)
+
+| Source | 1 connection | 8 connections | 16 connections |
+|---|---:|---:|---:|
+| kernel.org, 145 MB | 5.3–5.5 | 6.3–8.5 | 5.8 |
+| Hetzner, 100 MB | 3.8–5.6 | 5.3–6.3 | 5.5 |
+| Debian mirror, 756 MB | 24.9–26.6 | 9.5–20.2 | 21.6 |
 
 ### What this tells us
 
-- **Servers that cap each connection** (most file hosts): large gains, close to
-  linear in the number of connections.
-- **Fast CDNs near you**: small gains, because your line is the limit.
-- **When one connection already fills your line**, extra connections can *lower*
-  throughput through congestion. The engine measures what added connections
-  bring and backs off when they don't help (section 2); real networks are
-  noisy enough that this works better in the reproducible setup than on a
-  single real-world afternoon (section 4).
-- **Servers with strict per-IP limits** (Hetzner, OVH): connection count must
-  adapt, or the download stalls or the IP gets temporarily blocked. The engine
-  handles this with slow start and backing off on `429`/`503`.
+- **Servers that cap each connection** (most file hosts): large gains, close
+  to linear in the number of connections (section 1).
+- **CDNs near you** (kernel.org): moderate gains, about +45% with 8
+  connections over one.
+- **When one connection already fills your line** (the Debian mirror here):
+  one connection is fastest, about 25% ahead of 8. The engine can't detect
+  this reliably yet; set the download to 1–2 connections for such servers.
+- **Strict per-IP limits** (Hetzner, OVH): the engine backs off on
+  `429`/`503` and ends up at the ~2 connections the server allows, at the same
+  speed as a single connection.
+- **Open question:** on the Debian mirror the current engine is about 10%
+  slower than the old one with the same number of connections (4 of 4 pairs).
+  Every connection there goes through a redirect, and the current engine opens
+  more connections near the end of a download; that is the main suspect.
 
 ## Running your own
 
@@ -147,6 +160,7 @@ numbers mainly show it doesn't break anything on a fast mirror.
 cargo build --release -p gtf-engine --example get
 ./target/release/examples/get <url> <connections> <output-dir>
 # GTF_DEBUG=1 prints retries and connection-count changes
+# GTF_ADAPTIVE_DOWN=1 turns on the experimental throughput-based controller
 ```
 
 Contributions of measurements from other networks are welcome. Please open a

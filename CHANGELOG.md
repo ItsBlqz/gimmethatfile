@@ -41,10 +41,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Throughput-aware connection count: the engine measures what extra
-  connections bring and backs off when they don't help (for example when one
-  connection already fills the line), re-checking every 20 s. While a speed
-  limit is the bottleneck it uses as few connections as still reach it.
+- Connection count: while a speed limit is the bottleneck, the engine uses as
+  few connections as still reach it. Reducing connections based on measured
+  speed alone is experimental and off by default (`GTF_ADAPTIVE_DOWN=1`): on
+  a real CDN its 1-second measurements were too noisy and it cut speed by
+  more than half (see `docs/BENCHMARKS.md`).
+- Near the end of a download, idle connections may split segments down to
+  256 KiB (instead of 1 MiB) so the last megabytes don't wait on one slow
+  connection.
 - A connection stops reading as soon as it reaches the end of its segment
   instead of buffering data that would be thrown away.
 

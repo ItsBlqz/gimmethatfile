@@ -163,6 +163,11 @@ enum Phase {
 
 pub struct Controller {
     max: u32,
+    /// Reduce connections when measurements say they don't help. Off by
+    /// default: on real CDNs (kernel.org) 1–1.5 s measurements were too noisy
+    /// and it cut speed by more than half (see docs/BENCHMARKS.md). The
+    /// limit-binding and 429/503 paths don't depend on it.
+    adapt_down: bool,
     /// The connection count we have settled on (or are climbing through).
     level: u32,
     phase: Phase,
@@ -178,11 +183,18 @@ pub struct Controller {
 }
 
 impl Controller {
+    /// Also reduce connections based on measured throughput (experimental).
+    pub fn with_adaptive_down(mut self, on: bool) -> Self {
+        self.adapt_down = on;
+        self
+    }
+
     pub fn new(max: u32, now: Instant) -> Self {
         let max = max.max(1);
         let level = max.min(START);
         Self {
             max,
+            adapt_down: false,
             level,
             phase: if level < max {
                 Phase::Climb {
@@ -379,11 +391,13 @@ impl Controller {
                     if self.level >= self.max && m.workers >= f64::from(self.max) - 0.5 {
                         debug!("climbed to {} connections", self.level);
                         self.settle(now, false);
-                        // The climb reached the maximum so fast that TCP's own
-                        // ramp-up may have hidden a full line: check soon
-                        // whether fewer connections do as well.
-                        self.next_probe = now + FIRST_PROBE;
-                        self.next_dir = Dir::Down;
+                        if self.adapt_down {
+                            // The climb reached the maximum so fast that TCP's
+                            // own ramp-up may have hidden a full line: check
+                            // soon whether fewer connections do as well.
+                            self.next_probe = now + FIRST_PROBE;
+                            self.next_dir = Dir::Down;
+                        }
                     } else {
                         self.phase = next;
                     }
@@ -391,7 +405,7 @@ impl Controller {
                 }
                 let marginal = (m.rate - r.rate) / added;
                 let average = r.rate / r.workers.max(0.5);
-                if marginal >= GAIN_SHARE * average {
+                if marginal >= GAIN_SHARE * average || !self.adapt_down {
                     self.phase = next;
                     return self.target();
                 }
@@ -448,6 +462,14 @@ impl Controller {
                 }
                 let dir = if m.limited {
                     Dir::Down
+                } else if !self.adapt_down {
+                    // Only ever probe up (e.g. after a 429 lowered the count).
+                    if self.level < self.max && self.up_allowed(now) {
+                        Dir::Up
+                    } else {
+                        self.next_probe = now + REPROBE;
+                        return self.target();
+                    }
                 } else if self.next_dir == Dir::Up && self.up_allowed(now) {
                     Dir::Up
                 } else {
@@ -579,7 +601,7 @@ mod tests {
         fn new(max: u32) -> Self {
             let now = Instant::now();
             Self {
-                c: Controller::new(max, now),
+                c: Controller::new(max, now).with_adaptive_down(true),
                 now,
                 bytes: 0.0,
                 wait: Duration::ZERO,
@@ -631,6 +653,31 @@ mod tests {
     /// One connection fills a 25 MB/s line; more add congestion.
     fn saturated(n: u32) -> f64 {
         25.0 * MB / (1.0 + 0.1 * f64::from(n.max(1) - 1))
+    }
+
+    /// The default (no throughput-based reductions) keeps every connection
+    /// on a server that caps each one, like kernel.org's CDN, even when
+    /// measurements are noisy.
+    #[test]
+    fn default_never_cuts_connections_on_noise() {
+        let mut s = Sim::new(8);
+        s.c = Controller::new(8, s.now);
+        let mut flip = false;
+        for _ in 0..400 {
+            flip = !flip;
+            // Per-connection capped, with +-40% noise every tick.
+            let noisy = move |n: u32| per_conn(n) * if flip { 1.4 } else { 0.6 };
+            s.run(0.15, noisy, None);
+        }
+        assert_eq!(s.c.target(), 8);
+    }
+
+    #[test]
+    fn default_still_backs_off_under_a_speed_limit() {
+        let mut s = Sim::new(8);
+        s.c = Controller::new(8, s.now);
+        s.run(30.0, per_conn, Some(3.0 * MB));
+        assert!(s.c.target() <= 3, "{}", s.c.target());
     }
 
     #[test]

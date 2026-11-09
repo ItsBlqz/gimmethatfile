@@ -43,9 +43,9 @@ tested on Linux; you can [build from source](#building-from-source).
   [10x faster](docs/BENCHMARKS.md).
 - **Dynamic segmentation**: a connection that finishes early takes half of the
   largest remaining segment, so every connection works until the end.
-- **Adapts to the server and your line**: ramps connections up gradually,
-  keeps only the ones that actually add speed, backs off when the server says
-  "too many requests", and tries again later.
+- **Adapts to the server**: ramps connections up gradually, backs off when
+  the server says "too many requests" and tries again later, and uses few
+  connections when a speed limit is what holds the download back.
 - **Speed limits**: for all downloads together and per download, changeable
   while downloading.
 - **Pause and resume**, even after closing the app or a crash. If the file
@@ -108,9 +108,8 @@ File:
 3. **Steals work**: a connection that finishes early takes half of the biggest
    remaining region. If the region right after it is idle, it simply keeps
    reading on the same connection.
-4. **Adapts** the number of connections: it measures whether more
-   connections add speed and backs off when they don't or when the server
-   pushes back.
+4. **Adapts** the number of connections when the server pushes back, or when
+   your speed limit is the bottleneck.
 5. **Saves** which bytes are still missing, so resuming continues exactly where
    it stopped.
 
@@ -158,7 +157,7 @@ The download list and settings are stored in
 crates/engine/      Download engine (no UI, fully tested)
   src/probe.rs        Range support, size and file-name detection
   src/job.rs          Segmented download, work stealing, the supervisor
-  src/control.rs      How many connections to use (measured hill climb)
+  src/control.rs      How many connections to use
   src/limit.rs        Speed limits (shared token bucket)
   src/manager.rs      Queue, pause/resume, persistence, speed meter
   tests/e2e.rs        End-to-end tests against an in-process HTTP server
