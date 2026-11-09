@@ -43,8 +43,11 @@ tested on Linux; you can [build from source](#building-from-source).
   [10x faster](docs/BENCHMARKS.md).
 - **Dynamic segmentation**: a connection that finishes early takes half of the
   largest remaining segment, so every connection works until the end.
-- **Adapts to the server**: ramps connections up gradually, backs off when the
-  server says "too many requests", and tries again later.
+- **Adapts to the server and your line**: ramps connections up gradually,
+  keeps only the ones that actually add speed, backs off when the server says
+  "too many requests", and tries again later.
+- **Speed limits**: for all downloads together and per download, changeable
+  while downloading.
 - **Pause and resume**, even after closing the app or a crash. If the file
   changes on the server, the app notices and restarts it.
 - **Queue**: choose how many downloads run at once.
@@ -105,7 +108,9 @@ File:
 3. **Steals work**: a connection that finishes early takes half of the biggest
    remaining region. If the region right after it is idle, it simply keeps
    reading on the same connection.
-4. **Adapts** the number of connections to what the server tolerates.
+4. **Adapts** the number of connections: it measures whether more
+   connections add speed and backs off when they don't or when the server
+   pushes back.
 5. **Saves** which bytes are still missing, so resuming continues exactly where
    it stopped.
 
@@ -119,10 +124,11 @@ setup: `cargo run --release -p gtf-engine --example bench`):
 
 | Connections | 1 | 2 | 4 | 8 | 16 |
 |---|---:|---:|---:|---:|---:|
-| Speed-up | 1.0x | 2.0x | 3.8x | 7.1x | 10.0x |
+| Speed-up | 1.0x | 2.0x | 3.8x | 6.7x | 9.9x |
 
 Real-world results depend on the server and your line. When a single
-connection already fills your line, extra connections don't help. See
+connection already fills your line, extra connections don't help; the engine
+notices and falls back to fewer. See
 [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for measurements and caveats.
 
 ## Building from source
@@ -151,7 +157,9 @@ The download list and settings are stored in
 ```
 crates/engine/      Download engine (no UI, fully tested)
   src/probe.rs        Range support, size and file-name detection
-  src/job.rs          Segmented download, work stealing, adaptive connections
+  src/job.rs          Segmented download, work stealing, the supervisor
+  src/control.rs      How many connections to use (measured hill climb)
+  src/limit.rs        Speed limits (shared token bucket)
   src/manager.rs      Queue, pause/resume, persistence, speed meter
   tests/e2e.rs        End-to-end tests against an in-process HTTP server
   examples/           get (CLI download), bench (reproducible benchmark)
@@ -164,8 +172,7 @@ docs/               Architecture and benchmarks
 
 ## Roadmap
 
-Next up: throughput-aware connection count, speed
-limits, notifications and auto-update. The full list is in [TODO.md](TODO.md).
+Next up: auto-update, code signing and macOS/Linux builds. The full list is in [TODO.md](TODO.md).
 Ideas and votes are welcome in [issues](https://github.com/ItsBlqz/gimmethatfile/issues).
 
 ## Contributing

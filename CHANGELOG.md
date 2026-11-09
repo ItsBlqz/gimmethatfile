@@ -31,6 +31,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   windows that cross midnight. Downloads outside the window show "Waiting for
   schedule", keep their progress, and continue automatically; "Start now"
   runs a single download anyway.
+- Speed limits: one for all downloads together (Settings → Speed) and one per
+  download (in the add dialog under "More options", or later from the row's
+  ⋯ menu). Both apply immediately to running downloads, also without range
+  support, and the row shows when a download is limited.
+- `examples/bench.rs` can simulate a shared line with congestion
+  (`-- <per_conn> <file_MB> <line_MBps> <penalty>`), and `BENCH_CONNS=1,8`
+  runs only some connection counts.
+
+### Changed
+
+- Throughput-aware connection count: the engine measures what extra
+  connections bring and backs off when they don't help (for example when one
+  connection already fills the line), re-checking every 20 s. While a speed
+  limit is the bottleneck it uses as few connections as still reach it.
+- A connection stops reading as soon as it reaches the end of its segment
+  instead of buffering data that would be thrown away.
 
 ## [0.1.0] - 2026-11-08
 

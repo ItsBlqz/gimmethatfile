@@ -1,6 +1,7 @@
 use crate::fsutil;
 use crate::headers;
 use crate::job::{self, Cancelled, Job, StopReason};
+use crate::limit::RateLimiter;
 use crate::naming::{self, PART_EXT};
 use crate::probe;
 use crate::types::*;
@@ -35,6 +36,8 @@ struct Inner {
     rt: Handle,
     version: AtomicU64,
     events: broadcast::Sender<Event>,
+    /// Global speed limit, shared by every running download.
+    global_limit: Arc<RateLimiter>,
 }
 
 struct State {
@@ -179,6 +182,7 @@ impl Manager {
         let client = build_client(&[])?;
 
         let schedule_open = persisted.settings.schedule.allows_now();
+        let global_limit = Arc::new(RateLimiter::new(persisted.settings.speed_limit));
         let inner = Arc::new(Inner {
             client,
             state: Mutex::new(State {
@@ -192,6 +196,7 @@ impl Manager {
             rt: Handle::current(),
             version: AtomicU64::new(1),
             events: broadcast::channel(64).0,
+            global_limit,
         });
         Inner::spawn_ticker(&inner);
         inner.schedule();
@@ -415,11 +420,30 @@ impl Manager {
     pub fn set_settings(&self, mut s: Settings) {
         s.max_concurrent = s.max_concurrent.clamp(1, 10);
         s.connections = s.connections.clamp(1, 32);
+        s.speed_limit = s.speed_limit.filter(|&l| l > 0);
+        // Applies to running downloads right away.
+        self.inner.global_limit.set_rate(s.speed_limit);
         self.inner.state.lock().settings = s;
         self.inner.bump();
         self.inner.save();
         self.inner.apply_schedule();
         self.inner.schedule();
+    }
+
+    /// Change one download's speed limit (bytes/second, `None` or 0 =
+    /// unlimited). Takes effect immediately if it is running.
+    pub fn set_speed_limit(&self, id: DownloadId, limit: Option<u64>) {
+        let limit = limit.filter(|&l| l > 0);
+        {
+            let mut st = self.inner.state.lock();
+            let Some(e) = st.get_mut(id) else { return };
+            e.rec.speed_limit = limit;
+            if let Some(job) = &e.job {
+                job.limit.set_rate(limit);
+            }
+        }
+        self.inner.bump();
+        self.inner.save();
     }
 
     /// Where the file is (or will be) on disk.
@@ -491,6 +515,7 @@ impl Manager {
                     connections,
                     max_connections: r.connections,
                     segments: if r.resumable { segments } else { vec![] },
+                    speed_limit: r.speed_limit,
                     added_at: r.added_at,
                     completed_at: r.completed_at,
                     expected_sha256: r.expected_sha256.clone(),
@@ -584,7 +609,8 @@ impl Inner {
                     break;
                 }
                 if e.rec.status == Status::Queued && e.job.is_none() && (open || e.forced) {
-                    let job = Job::new();
+                    let job = Job::with_global_limit(self.global_limit.clone());
+                    job.limit.set_rate(e.rec.speed_limit);
                     e.job = Some(job.clone());
                     e.rec.status = Status::Connecting;
                     e.rec.error = None;

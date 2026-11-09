@@ -177,6 +177,8 @@ pub struct Snapshot {
     pub max_connections: u32,
     /// Ranges still missing; the UI draws these as gaps in the progress bar.
     pub segments: Vec<Range>,
+    /// This download's own speed limit, bytes/second (`None` = unlimited).
+    pub speed_limit: Option<u64>,
     pub added_at: u64,
     pub completed_at: Option<u64>,
     pub expected_sha256: Option<String>,

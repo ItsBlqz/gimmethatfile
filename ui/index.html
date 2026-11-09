@@ -70,6 +70,7 @@
         <svg viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg>
         <b id="speed-value">0 B/s</b>
       </span>
+      <button class="link-btn hidden" id="global-limit" title="Speed limit for all downloads (click to change)"></button>
       <span id="summary" class="muted"></span>
     </div>
     <div class="bulk">
@@ -106,6 +107,13 @@
         <summary>More options</summary>
         <div class="more-options-body">
           <!-- add:speed -->
+          <label class="field">
+            <span>Speed limit</span>
+            <div class="unit-input">
+              <input type="number" data-add="speed_limit" data-scale="1048576" min="0" step="any" placeholder="Unlimited" />
+              <span class="unit">MB/s</span>
+            </div>
+          </label>
           <!-- /add:speed -->
           <!-- add:checksum -->
           <label class="field">
@@ -157,6 +165,17 @@
         <!-- /section:downloads -->
 
         <!-- section:speed -->
+        <section class="settings-section">
+          <h4>Speed</h4>
+          <label class="field">
+            <span>Speed limit for all downloads</span>
+            <div class="unit-input">
+              <input type="number" data-setting="speed_limit" data-scale="1048576" min="0" step="any" placeholder="Unlimited" />
+              <span class="unit">MB/s</span>
+            </div>
+          </label>
+          <p class="hint">Shared by all running downloads and applied right away. Leave empty for no limit. A single download can have its own limit too: use the ⋯ button on its row.</p>
+        </section>
         <!-- /section:speed -->
 
         <!-- section:behavior -->
@@ -235,6 +254,43 @@
     </form>
   </dialog>
 
+  <!-- Per-row "⋯" menu (one shared element, positioned next to the button).
+       Items: <button data-action="..."> handled in app.js ("row menu"). -->
+  <div id="row-menu" class="menu hidden" role="menu">
+    <button type="button" role="menuitem" data-action="speed-limit">
+      <svg viewBox="0 0 24 24"><path d="M12 14l4-4"/><path d="M3.3 19a10 10 0 1 1 17.4 0"/></svg>
+      Speed limit…
+    </button>
+  </div>
+
+  <!-- Per-download speed limit -->
+  <dialog id="dlg-limit" class="modal small">
+    <form method="dialog" id="form-limit">
+      <h3>Speed limit</h3>
+      <p class="muted ellipsis" id="limit-name"></p>
+      <label class="field">
+        <span>Limit for this download</span>
+        <div class="unit-input">
+          <input id="limit-value" type="number" min="0" step="any" placeholder="Unlimited" />
+          <span class="unit">MB/s</span>
+        </div>
+      </label>
+      <div class="chips" id="limit-presets">
+        <button type="button" class="chip" data-mbps="">Unlimited</button>
+        <button type="button" class="chip" data-mbps="0.5">0.5</button>
+        <button type="button" class="chip" data-mbps="1">1</button>
+        <button type="button" class="chip" data-mbps="2">2</button>
+        <button type="button" class="chip" data-mbps="5">5</button>
+        <button type="button" class="chip" data-mbps="10">10 MB/s</button>
+      </div>
+      <p class="hint">Applies right away. The limit for all downloads (in Settings) still applies on top.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="toasts" class="toasts"></div>
 
   <template id="tpl-row">
@@ -258,6 +314,9 @@
         <button class="icon-btn act-toggle"></button>
         <button class="icon-btn act-folder" title="Show in folder">
           <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+        </button>
+        <button class="icon-btn act-more" title="More">
+          <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
         </button>
         <button class="icon-btn act-remove" title="Remove">
           <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>

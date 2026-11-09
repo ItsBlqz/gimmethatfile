@@ -119,6 +119,11 @@ function render() {
   if (waiting) parts.push(`${waiting} waiting for schedule`);
   if (done) parts.push(`${done} completed`);
   $("#summary").textContent = parts.join(" · ");
+
+  const globalLimit = settings?.speed_limit;
+  const limitBtn = $("#global-limit");
+  limitBtn.classList.toggle("hidden", !globalLimit);
+  if (globalLimit) limitBtn.textContent = `Limit ${fmtSpeed(globalLimit)}`;
 }
 
 function createRow(id) {
@@ -128,6 +133,7 @@ function createRow(id) {
   el.querySelector(".act-start").addEventListener("click", () => call("force_start", { id }).then(refresh));
   el.querySelector(".act-folder").addEventListener("click", () => call("reveal", { id }));
   el.querySelector(".act-remove").addEventListener("click", () => askRemove(id));
+  el.querySelector(".act-more").addEventListener("click", (e) => openRowMenu(id, e.currentTarget));
   el.addEventListener("dblclick", (e) => {
     if (e.target.closest("button")) return;
     const d = items.find((x) => x.id === id);
@@ -196,6 +202,9 @@ function updateRow(el, d) {
       else meta = `<span class="ok">Completed</span> · ${done}`;
       break;
     }
+  }
+  if (d.speed_limit && ["queued", "connecting", "downloading", "paused"].includes(d.status)) {
+    meta += ` · <span class="lim" title="Speed limit for this download">Limit ${fmtSpeed(d.speed_limit)}</span>`;
   }
   const metaEl = el.querySelector(".meta");
   if (metaEl.innerHTML !== meta) metaEl.innerHTML = meta;
@@ -423,6 +432,7 @@ $("#form-settings").addEventListener("submit", async (e) => {
   await call("set_settings", { settings: next });
   settings = (await call("get_settings")) || next;
   dlgSettings.close();
+  render();
 });
 
 // ---------- schedule settings ----------
@@ -498,6 +508,94 @@ $("#form-remove").addEventListener("submit", async (e) => {
   dlgRemove.close();
   refresh();
 });
+
+// ---------- row menu ("⋯") ----------
+const rowMenu = $("#row-menu");
+let menuTarget = null; // { id, button }
+
+function openRowMenu(id, button) {
+  if (menuTarget?.button === button) return closeRowMenu();
+  closeRowMenu();
+  menuTarget = { id, button };
+  button.classList.add("open");
+  rowMenu.classList.remove("hidden");
+  // Below the button, right-aligned with it; flip up near the bottom edge.
+  const r = button.getBoundingClientRect();
+  const m = rowMenu.getBoundingClientRect();
+  const top = r.bottom + 4 + m.height > window.innerHeight ? r.top - 4 - m.height : r.bottom + 4;
+  rowMenu.style.top = `${Math.max(4, top)}px`;
+  rowMenu.style.left = `${Math.max(4, r.right - m.width)}px`;
+}
+
+function closeRowMenu() {
+  if (!menuTarget) return;
+  menuTarget.button.classList.remove("open");
+  menuTarget = null;
+  rowMenu.classList.add("hidden");
+}
+
+const menuActions = {
+  "speed-limit": (id) => openLimit(id),
+};
+
+rowMenu.addEventListener("click", (e) => {
+  const item = e.target.closest("[data-action]");
+  if (!item || !menuTarget) return;
+  const { id } = menuTarget;
+  closeRowMenu();
+  menuActions[item.dataset.action]?.(id);
+});
+document.addEventListener("mousedown", (e) => {
+  if (menuTarget && !rowMenu.contains(e.target) && !menuTarget.button.contains(e.target)) closeRowMenu();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeRowMenu(); });
+listEl.addEventListener("scroll", closeRowMenu);
+window.addEventListener("resize", closeRowMenu);
+
+// ---------- per-download speed limit ----------
+const dlgLimit = $("#dlg-limit");
+const MB = 1048576;
+let limitTarget = null;
+
+function syncLimitPresets() {
+  const v = $("#limit-value").value;
+  $("#limit-presets").querySelectorAll(".chip").forEach((c) => {
+    c.classList.toggle("active", c.dataset.mbps === "" ? v === "" : Number(c.dataset.mbps) === Number(v) && v !== "");
+  });
+}
+
+function openLimit(id) {
+  const d = items.find((x) => x.id === id);
+  if (!d) return;
+  limitTarget = id;
+  $("#limit-name").textContent = nameOf(d);
+  $("#limit-value").value = d.speed_limit ? +(d.speed_limit / MB).toFixed(2) : "";
+  syncLimitPresets();
+  dlgLimit.showModal();
+  $("#limit-value").select();
+}
+
+$("#limit-value").addEventListener("input", syncLimitPresets);
+$("#limit-presets").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  $("#limit-value").value = chip.dataset.mbps;
+  syncLimitPresets();
+});
+
+$("#form-limit").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (limitTarget != null) {
+    const v = $("#limit-value").value;
+    const limit = v === "" || Number(v) <= 0 ? null : Math.round(Number(v) * MB);
+    await call("set_speed_limit", { id: limitTarget, limit });
+    limitTarget = null;
+  }
+  dlgLimit.close();
+  refresh();
+});
+
+$("#global-limit").addEventListener("click", () => $("#btn-settings").click());
 
 // ---------- generic ----------
 document.querySelectorAll("[data-close]").forEach((b) =>
