@@ -3,36 +3,28 @@
 Working list of what to build next. This file is the quick overview; bigger
 items can also get an issue.
 
-## In progress
+## Next
 
-- [ ] **Throughput-aware connection count.** Only add connections while total
-      speed actually improves, and drop back when it falls. Today, extra
-      connections can be slower than one when a single connection already fills
-      the line (Debian mirror: 26 MB/s with 1 connection vs 9–20 MB/s with 8;
-      see `docs/BENCHMARKS.md`).
-- [ ] **Speed limits**: a global limit, plus an optional limit per download.
-- [ ] **Browser download capture** (see below), including per-download request
-      headers and cookies in the engine.
-- [ ] **Notification** when a download finishes or fails.
-- [ ] **Setting: minimize to tray** (today only the close button does that).
-- [ ] **Start with Windows** (optional; starts hidden in the tray).
-- [ ] **SHA-256 verification**: optionally paste the expected hash when adding a
-      download and check it after completion.
-- [ ] **Scheduler**: only download between set times.
-
-### Browser download capture
-Catch downloads in Chrome/Edge/Firefox and hand them to the app instead of the
-browser's own downloader.
-
-- A WebExtension (Manifest V3) that sees new browser downloads, cancels them,
-  and sends the URL, file name, referrer and any cookies the server needs to
-  the app.
-- The app accepts these over a localhost endpoint that only answers browser
-  extensions, not web pages.
-- If the app isn't running or capture is off, the browser downloads the file
-  as usual.
-- Settings: file types and minimum size to capture, sites to skip, and a way to
-  let one download through to the browser.
+- [ ] **Slow end of downloads.** With several connections, the last ~2% can
+      take several seconds when each connection to the server is slow (Debian
+      mirror: 1 connection finishes its last 2% in ~1 s, 8 connections in
+      4–9 s). Smaller splits near the end help in theory but didn't measurably
+      change this. Ideas: race the slowest remaining segment on a second
+      connection, or reuse the fastest connection.
+- [ ] **Adaptive connection count on real servers.** It fixes the simulated
+      "line already full" case (16 connections: 8.2 → 17.9 MB/s), but on the
+      real Debian mirror results were inconclusive (noise of ±30% between runs).
+      Needs more measurements across different servers, perhaps longer windows.
+- [ ] **Clear stored cookies** from a download once it completes (they are kept
+      in the local download list so resume works).
+- [ ] **Dev instance next to the installed app**: let a debug build with
+      `GIMMETHATFILE_DATA_DIR` set skip the single-instance check (and use
+      another receiver port), so tests don't collide with a running copy.
+- [ ] **Verify notifications on a machine with toasts enabled**, including
+      clicking one to show the window.
+- [ ] Global speed limit is shared per connection, not per download, so a
+      download with more connections gets a bigger share.
+- [ ] Test the extension in Firefox (manifest is prepared, untested).
 
 ## Backlog
 
@@ -46,6 +38,16 @@ browser's own downloader.
       private vulnerability reporting, tag `v0.1.0`.
 
 ## Done
+
+- [x] Speed limits: global and per download (live, persisted, ⋯ row menu)
+- [x] Throughput-aware connection count (adds connections only while they
+      help; backs off on a saturated line; re-probes every 20 s)
+- [x] Browser download capture: Chrome/Edge extension, local receiver on
+      127.0.0.1:47811 that only answers extensions, per-download cookies/headers
+- [x] Notifications when a download finishes or fails
+- [x] Settings: minimize to tray, start with Windows (hidden in the tray)
+- [x] Optional SHA-256 verification after download
+- [x] Scheduler (set hours and days, overnight windows, "Start now" override)
 
 - [x] Close button hides to the tray; downloads keep running; tray menu has
       Show / Pause all / Resume all / Quit

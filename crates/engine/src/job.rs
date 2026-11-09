@@ -33,6 +33,30 @@ macro_rules! debug {
 
 /// Never split a segment into pieces smaller than this.
 pub const MIN_SPLIT: u64 = 1 << 20;
+/// Near the end of a download, allow smaller splits so the last few
+/// megabytes don't hang on one slow connection while the others sit idle.
+const TAIL_SPLIT: u64 = 256 << 10;
+/// "Near the end" = this much or less is left in total.
+const TAIL_ZONE: u64 = 16 << 20;
+
+/// Smallest segment worth splitting in half, given how much is left overall.
+fn split_min(total_remaining: u64) -> u64 {
+    if total_remaining <= TAIL_ZONE {
+        TAIL_SPLIT
+    } else {
+        MIN_SPLIT
+    }
+}
+
+/// Bytes left across all segments (caller holds the segment-list lock).
+fn remaining_of(segs: &[Arc<Segment>]) -> u64 {
+    segs.iter()
+        .map(|s| {
+            let (p, e) = s.range();
+            e.saturating_sub(p)
+        })
+        .sum()
+}
 /// Bytes buffered per connection before they are written to disk.
 const BUF_SIZE: usize = 512 * 1024;
 /// Write at least this often so progress (and resume state) stays fresh.
@@ -263,10 +287,12 @@ impl Job {
     }
 
     fn has_claimable(&self) -> bool {
-        self.segments.lock().iter().any(|s| {
+        let segs = self.segments.lock();
+        let min = split_min(remaining_of(&segs));
+        segs.iter().any(|s| {
             let st = s.st.lock();
             let rem = st.end - st.pos;
-            (!st.owned && rem > 0) || (st.owned && rem >= 2 * MIN_SPLIT)
+            (!st.owned && rem > 0) || (st.owned && rem >= 2 * min)
         })
     }
 
@@ -341,18 +367,19 @@ impl Job {
                 return Some(s.clone());
             }
         }
+        let min = split_min(remaining_of(&segs));
         let victim = segs
             .iter()
             .filter_map(|s| {
                 let st = s.st.lock();
                 let rem = st.end - st.pos;
-                (st.owned && rem >= 2 * MIN_SPLIT).then_some((s.clone(), rem))
+                (st.owned && rem >= 2 * min).then_some((s.clone(), rem))
             })
             .max_by_key(|(_, rem)| *rem)?
             .0;
         let mut st = victim.st.lock();
         let rem = st.end - st.pos;
-        if rem < 2 * MIN_SPLIT {
+        if rem < 2 * min {
             return None;
         }
         let mid = st.pos + rem / 2;
@@ -530,12 +557,18 @@ pub async fn download_ranged(
             throttles = t;
             ctl.on_throttle(now, job.target.load(Relaxed));
         }
-        let target = ctl.tick(Sample {
-            at: now,
-            bytes: job.received.load(Relaxed),
-            workers: job.workers.load(Relaxed),
-            limiter_wait: Duration::from_nanos(job.limiter_wait_ns.load(Relaxed)),
-        });
+        // In the last few MB, measurements are dominated by connections
+        // finishing, so stop adapting and keep the current target.
+        let target = if job.remaining() <= TAIL_ZONE {
+            job.target.load(Relaxed)
+        } else {
+            ctl.tick(Sample {
+                at: now,
+                bytes: job.received.load(Relaxed),
+                workers: job.workers.load(Relaxed),
+                limiter_wait: Duration::from_nanos(job.limiter_wait_ns.load(Relaxed)),
+            })
+        };
         job.target.store(target, Relaxed);
 
         if (set.len() as u32) < target && now >= next_spawn && job.has_claimable() {
@@ -844,6 +877,43 @@ async fn single_once(client: &Client, url: &str, file: &File, job: &Job) -> anyh
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn splits_smaller_near_the_end() {
+        // 1.5 MiB left in one owned segment: too small to split normally,
+        // but inside the tail zone, so an idle worker can take half.
+        let job = Job::new();
+        job.init(
+            vec![Range {
+                pos: 0,
+                end: 3 * MIN_SPLIT / 2,
+            }],
+            Some(3 * MIN_SPLIT / 2),
+        );
+        let a = job.claim().unwrap();
+        let b = job.claim().expect("tail split");
+        assert_eq!(a.range().1, b.range().0);
+        assert_eq!(b.range().1, 3 * MIN_SPLIT / 2);
+        // Far from the end the normal minimum still applies.
+        let big = Job::new();
+        big.init(
+            vec![
+                Range {
+                    pos: 0,
+                    end: 3 * MIN_SPLIT / 2,
+                },
+                Range {
+                    pos: 64 * MIN_SPLIT,
+                    end: 128 * MIN_SPLIT,
+                },
+            ],
+            Some(128 * MIN_SPLIT),
+        );
+        let _first = big.claim().unwrap();
+        let _second = big.claim().unwrap();
+        let third = big.claim().expect("splits the big segment");
+        assert!(third.range().0 >= 64 * MIN_SPLIT);
+    }
 
     #[test]
     fn splits_evenly() {
