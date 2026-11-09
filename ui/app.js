@@ -263,6 +263,11 @@ function openAdd(prefill = "") {
   $("#add-dir").value = settings?.download_dir || "";
   fillSelect($("#add-conns"), CONN_OPTIONS, settings?.connections ?? 8);
   $("#add-error").classList.add("hidden");
+  $("#form-add").querySelectorAll("[data-add]").forEach((el) => {
+    if (el.type === "checkbox") el.checked = false;
+    else el.value = "";
+  });
+  $("#add-more").open = false;
   updateLinkCount();
   dlgAdd.showModal();
   $("#add-urls").focus();
@@ -292,10 +297,20 @@ $("#form-add").addEventListener("submit", async (e) => {
   e.preventDefault();
   const urls = extractUrls($("#add-urls").value);
   if (!urls.length) return;
+  // Optional per-download options from "More options": data-add="key".
+  // Number inputs: empty = null, multiplied by data-scale if present.
+  const options = {};
+  $("#form-add").querySelectorAll("[data-add]").forEach((el) => {
+    const scale = Number(el.dataset.scale || 1);
+    if (el.type === "checkbox") options[el.dataset.add] = el.checked;
+    else if (el.type === "number") options[el.dataset.add] = el.value === "" ? null : Math.round(Number(el.value) * scale);
+    else options[el.dataset.add] = el.value.trim() || null;
+  });
   const res = await call("add_downloads", {
     urls,
     dir: $("#add-dir").value.trim() || null,
     connections: Number($("#add-conns").value),
+    options,
   });
   if (!res) return;
   if (res.errors.length) {

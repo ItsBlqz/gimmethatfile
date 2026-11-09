@@ -100,6 +100,17 @@
         <span>Connections per file</span>
         <select id="add-conns"></select>
       </label>
+      <!-- Optional per-download settings. Inputs with data-add="<key>" are sent
+           to add_downloads as options.<key> (see "add dialog" in app.js). -->
+      <details class="more-options" id="add-more">
+        <summary>More options</summary>
+        <div class="more-options-body">
+          <!-- add:speed -->
+          <!-- /add:speed -->
+          <!-- add:checksum -->
+          <!-- /add:checksum -->
+        </div>
+      </details>
       <p class="error-text hidden" id="add-error"></p>
       <div class="modal-actions">
         <button type="button" class="btn ghost" data-close>Cancel</button>

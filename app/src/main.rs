@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use gtf_engine::{DownloadId, Manager, Settings, Snapshot, Status};
+use gtf_engine::{AddOptions, DownloadId, Manager, Settings, Snapshot, Status};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -22,18 +22,35 @@ struct AddResult {
     errors: Vec<String>,
 }
 
+/// Optional per-download settings from the add dialog's "More options".
+#[derive(Default, serde::Deserialize)]
+struct AddExtras {
+    speed_limit: Option<u64>,
+    expected_sha256: Option<String>,
+}
+
 #[tauri::command]
 fn add_downloads(
     app: State<App>,
     urls: Vec<String>,
     dir: Option<String>,
     connections: Option<u32>,
+    options: Option<AddExtras>,
 ) -> AddResult {
     let dir = dir.filter(|d| !d.trim().is_empty()).map(PathBuf::from);
+    let extras = options.unwrap_or_default();
     let mut added = 0;
     let mut errors = vec![];
     for url in urls.iter().map(|u| u.trim()).filter(|u| !u.is_empty()) {
-        match app.0.add(url, dir.clone(), connections) {
+        let opts = AddOptions {
+            dir: dir.clone(),
+            connections,
+            speed_limit: extras.speed_limit,
+            // A hash only makes sense for a single file.
+            expected_sha256: extras.expected_sha256.clone().filter(|_| urls.len() == 1),
+            ..Default::default()
+        };
+        match app.0.add_with(url, opts) {
             Ok(_) => added += 1,
             Err(e) => errors.push(format!("{url}: {e:#}")),
         }

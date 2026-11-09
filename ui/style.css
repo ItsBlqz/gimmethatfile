@@ -252,6 +252,11 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 .settings-section { display: flex; flex-direction: column; gap: 12px; }
 .settings-section + .settings-section { border-top: 1px solid var(--border); padding-top: 18px; }
 .settings-section h4 { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.more-options summary { cursor: pointer; font-size: 12.5px; font-weight: 500; color: var(--muted); list-style: none; display: inline-flex; align-items: center; gap: 6px; }
+.more-options summary::before { content: "▸"; font-size: 10px; transition: transform .12s; }
+.more-options[open] summary::before { transform: rotate(90deg); }
+.more-options summary:hover { color: var(--text); }
+.more-options-body { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
 /* ---------- Toasts ---------- */
