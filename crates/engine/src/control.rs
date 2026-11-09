@@ -80,13 +80,22 @@ const MAX_BACKOFF: u32 = 3;
 /// Quiet time after server push-back before probing up again.
 pub const RAISE_AFTER: Duration = Duration::from_secs(15);
 /// A step up must gain at least this much...
-const MIN_GAIN: f64 = 0.10;
+const MIN_GAIN: f64 = 0.15;
 /// ...and at least this share of the proportional gain (4 -> 8 = +100%).
 const GAIN_SHARE: f64 = 0.4;
 /// A step down that gains more than this means congestion: halve next.
-const FASTER: f64 = 0.03;
+const FASTER: f64 = 0.10;
 /// A step down is kept if it loses at most this much.
-const DOWN_TOLERANCE: f64 = 0.07;
+const DOWN_TOLERANCE: f64 = 0.10;
+/// Wait after opening extra connections before measuring a trial.
+const TRIAL_SETTLE_UP: Duration = Duration::from_millis(500);
+/// Wait after closing connections before measuring: the remaining ones need
+/// time to grow into the freed bandwidth.
+const TRIAL_SETTLE_DOWN: Duration = Duration::from_millis(1000);
+/// Measurement window for trials (longer than `WINDOW` for more evidence).
+const TRIAL_WINDOW: Duration = Duration::from_millis(1500);
+/// Don't probe when the download will finish within about this long.
+const ENDGAME: Duration = Duration::from_secs(10);
 /// Share of connection time spent waiting for the limiter above which the
 /// limiter counts as the bottleneck.
 const LIMITED_SHARE: f64 = 0.2;
@@ -101,6 +110,8 @@ pub struct Sample {
     pub workers: u32,
     /// Total time connections have spent waiting for the speed limiter.
     pub limiter_wait: Duration,
+    /// Bytes still to download.
+    pub remaining: u64,
 }
 
 /// Speed over a span of samples.
@@ -431,6 +442,10 @@ impl Controller {
                 if now < self.next_probe {
                     return self.target();
                 }
+                // Nearly done: a probe couldn't finish, and would only cost.
+                if (s.remaining as f64) < m.rate * ENDGAME.as_secs_f64() {
+                    return self.target();
+                }
                 let dir = if m.limited {
                     Dir::Down
                 } else if self.next_dir == Dir::Up && self.up_allowed(now) {
@@ -474,30 +489,36 @@ impl Controller {
                     }
                     return self.target();
                 };
-                let from = open_at + SETTLE;
-                if now < from + WINDOW / 2 {
+                let from = open_at
+                    + match dir {
+                        Dir::Up => TRIAL_SETTLE_UP,
+                        Dir::Down => TRIAL_SETTLE_DOWN,
+                    };
+                if now < from + TRIAL_WINDOW / 2 {
                     return self.target();
                 }
                 let Some(m) = self.measure(from) else {
                     return self.target();
                 };
                 let gain = m.rate / base_rate.max(1.0) - 1.0;
-                let done = now >= from + WINDOW;
+                let done = now >= from + TRIAL_WINDOW;
                 let keep = match dir {
                     Dir::Up => {
                         let g = f64::from(to - self.level) / f64::from(self.level);
                         let need = MIN_GAIN.max(GAIN_SHARE * g);
-                        // Accept early when the gain is already obvious.
-                        if m.limited || (done && gain < need) {
+                        // No early accept: an extra connection must prove
+                        // itself over the whole window.
+                        if m.limited {
                             Some(false)
-                        } else if gain >= 2.0 * need || done {
-                            Some(true)
                         } else {
-                            None
+                            done.then_some(gain >= need)
                         }
                     }
                     // Still held back by our own limit: fewer connections suffice.
-                    Dir::Down => done.then_some(gain >= -DOWN_TOLERANCE || m.limited),
+                    Dir::Down if m.limited => done.then_some(true),
+                    // An obvious loss: end the trial early.
+                    Dir::Down if gain < -3.0 * DOWN_TOLERANCE => Some(false),
+                    Dir::Down => done.then_some(gain >= -DOWN_TOLERANCE),
                 };
                 let Some(keep) = keep else {
                     return self.target();
@@ -549,6 +570,7 @@ mod tests {
         bytes: f64,
         wait: Duration,
         workers: u32,
+        remaining: u64,
     }
 
     const TICK: Duration = Duration::from_millis(150);
@@ -562,6 +584,7 @@ mod tests {
                 bytes: 0.0,
                 wait: Duration::ZERO,
                 workers: 0,
+                remaining: u64::MAX,
             }
         }
 
@@ -593,6 +616,7 @@ mod tests {
                     bytes: self.bytes as u64,
                     workers: self.workers,
                     limiter_wait: self.wait,
+                    remaining: self.remaining,
                 });
             }
             (self.bytes - start.1) / self.now.duration_since(start.0).as_secs_f64()
@@ -607,6 +631,19 @@ mod tests {
     /// One connection fills a 25 MB/s line; more add congestion.
     fn saturated(n: u32) -> f64 {
         25.0 * MB / (1.0 + 0.1 * f64::from(n.max(1) - 1))
+    }
+
+    #[test]
+    fn no_probes_in_the_endgame() {
+        let mut s = Sim::new(2);
+        s.run(5.0, per_conn, None);
+        assert_eq!(s.c.target(), 2);
+        // 8 MB left at ~4 MB/s: well inside the last 10 s.
+        s.remaining = 8_000_000;
+        for _ in 0..100 {
+            s.run(0.15, per_conn, None);
+            assert_eq!(s.c.target(), 2);
+        }
     }
 
     #[test]

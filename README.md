@@ -124,7 +124,7 @@ setup: `cargo run --release -p gtf-engine --example bench`):
 
 | Connections | 1 | 2 | 4 | 8 | 16 |
 |---|---:|---:|---:|---:|---:|
-| Speed-up | 1.0x | 2.0x | 3.8x | 6.7x | 9.9x |
+| Speed-up | 1.0x | 2.0x | 3.8x | 7.1x | 10.2x |
 
 Real-world results depend on the server and your line. When a single
 connection already fills your line, extra connections don't help; the engine

@@ -557,18 +557,14 @@ pub async fn download_ranged(
             throttles = t;
             ctl.on_throttle(now, job.target.load(Relaxed));
         }
-        // In the last few MB, measurements are dominated by connections
-        // finishing, so stop adapting and keep the current target.
-        let target = if job.remaining() <= TAIL_ZONE {
-            job.target.load(Relaxed)
-        } else {
-            ctl.tick(Sample {
-                at: now,
-                bytes: job.received.load(Relaxed),
-                workers: job.workers.load(Relaxed),
-                limiter_wait: Duration::from_nanos(job.limiter_wait_ns.load(Relaxed)),
-            })
-        };
+        // The controller itself stops probing near the end (see ENDGAME).
+        let target = ctl.tick(Sample {
+            at: now,
+            bytes: job.received.load(Relaxed),
+            workers: job.workers.load(Relaxed),
+            limiter_wait: Duration::from_nanos(job.limiter_wait_ns.load(Relaxed)),
+            remaining: job.remaining(),
+        });
         job.target.store(target, Relaxed);
 
         if (set.len() as u32) < target && now >= next_spawn && job.has_claimable() {

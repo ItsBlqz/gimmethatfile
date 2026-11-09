@@ -23,16 +23,15 @@ cargo run --release -p gtf-engine --example bench -- 2 128   # 2 MB/s per connec
 | 1 | 67.1 s | 1.9 MB/s | 1.0x |
 | 2 | 34.3 s | 3.7 MB/s | 2.0x |
 | 4 | 17.7 s | 7.2 MB/s | 3.8x |
-| 8 | 10.0 s | 12.8 MB/s | 6.7x |
-| 16 | 6.8 s | 19.0 MB/s | 9.9x |
+| 8 | 9.5 s | 13.5 MB/s | 7.1x |
+| 16 | 6.6 s | 19.5 MB/s | 10.2x |
 
 The gap to a perfect 8x/16x is the slow-start ramp: the engine opens 4
 connections, then adds one every 300 ms, so it doesn't trip servers' abuse
 protection. Since the connection count became throughput-aware (see below),
 the engine also checks once, about 2 s after reaching the maximum, whether
-fewer connections would do as well. Here they don't, so it reverts, but the
-check costs about 0.6 s with 8 connections (9.4 s before) and nothing
-measurable with 16 or with 4 or fewer.
+fewer connections would do as well. Here they don't, so it reverts; the check
+costs nothing measurable (8 connections: 9.5 s, 9.4 s before).
 
 ## 2. Reproducible: one connection already fills the line
 
@@ -55,8 +54,8 @@ the maximum) that it had until this change.
 | 1 | 18.9 MB/s | 1.0 | 18.9 MB/s | 1.0 |
 | 2 | 17.2 MB/s | 2.0 | 18.6 MB/s | 1.1 |
 | 4 | 14.6 MB/s | 3.9 | 18.0 MB/s | 1.5 |
-| 8 | 11.5 MB/s | 7.6 | 17.9 MB/s | 1.7 |
-| 16 | 8.2 MB/s | 14.6 | 17.9 MB/s | 1.7 |
+| 8 | 11.5 MB/s | 7.6 | 17.4 MB/s | 1.8 |
+| 16 | 8.2 MB/s | 14.6 | 17.5 MB/s | 1.7 |
 
 A middle case, where each connection is capped at 4 MB/s *and* the line is
 full at 20 MB/s (`-- 4 256 20 0.1`; the best here is 4 connections at
@@ -65,14 +64,17 @@ full at 20 MB/s (`-- 4 256 20 0.1`; the best here is 4 connections at
 | Max. connections | Before | Avg. open | Now | Avg. open |
 |---:|---:|---:|---:|---:|
 | 1 | 3.8 MB/s | 1.0 | 3.8 MB/s | 1.0 |
-| 8 | 11.0 MB/s | 7.6 | 13.7 MB/s | 4.0 |
-| 16 | 7.9 MB/s | 14.6 | 10.9 MB/s | 3.1 |
+| 8 | 11.0 MB/s | 7.6 | 13.5 MB/s | 3.9 |
+| 16 | 7.9 MB/s | 14.6 | 13.4 MB/s | 3.9 |
 
 The remaining gap to the best case is the time spent finding it: the climb
 overshoots for a second or two, and every 20 s (backing off up to 160 s) a
 probe tries one step up or down.
 
-## 3. Engine overhead
+## 3. Engine overhead (local loopback, not internet speed)
+
+These numbers measure the engine itself, over a connection that never leaves
+the machine; they are not download speeds you will see from the internet.
 
 The same benchmark with no cap (`-- 100000 1024`, a 1 GB file over loopback)
 measures how fast the engine itself can go: **about 250–370 MB/s with 1
