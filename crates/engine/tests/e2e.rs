@@ -1,4 +1,4 @@
-use gtf_engine::{Manager, Settings, Snapshot, Status};
+use gtf_engine::{AddOptions, Checksum, Event, Manager, Schedule, Settings, Snapshot, Status};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -322,4 +322,258 @@ async fn accepts_full_reply_to_open_range_at_zero() {
     let snap = wait_for(&m, id, |s| s.status == Status::Completed).await;
     assert!(snap.resumable);
     assert_eq!(read_result(tmp.path(), &snap), *body);
+}
+
+// ---------- SHA-256 verification ----------
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+async fn next_event(rx: &mut tokio::sync::broadcast::Receiver<Event>) -> Event {
+    tokio::time::timeout(Duration::from_secs(60), rx.recv())
+        .await
+        .expect("no event")
+        .expect("event channel closed")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn checksum_match_is_verified_and_persisted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let body = data(5 * 1024 * 1024 + 3);
+    let addr = serve(body.clone(), true, Duration::ZERO).await;
+    let m = manager(tmp.path());
+    let mut events = m.subscribe();
+    let id = m
+        .add_with(
+            &format!("http://{addr}/ok.bin"),
+            AddOptions {
+                // Upper case and surrounding spaces are accepted.
+                expected_sha256: Some(format!(" {} ", sha256_hex(&body).to_uppercase())),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let snap = wait_for(&m, id, |s| s.checksum == Some(Checksum::Ok)).await;
+    assert_eq!(snap.status, Status::Completed);
+    assert_eq!(read_result(tmp.path(), &snap), *body);
+    assert_eq!(
+        next_event(&mut events).await,
+        Event::Completed {
+            id,
+            file_name: "test.bin".into()
+        }
+    );
+
+    // The result survives a restart.
+    let reloaded = Manager::load(tmp.path().join("state.json")).unwrap();
+    let snap = reloaded
+        .snapshot()
+        .into_iter()
+        .find(|s| s.id == id)
+        .unwrap();
+    assert_eq!(snap.checksum, Some(Checksum::Ok));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn checksum_mismatch_is_flagged_and_file_kept() {
+    let tmp = tempfile::tempdir().unwrap();
+    let body = data(2 * 1024 * 1024);
+    let addr = serve(body.clone(), false, Duration::ZERO).await;
+    let m = manager(tmp.path());
+    let mut events = m.subscribe();
+    let id = m
+        .add_with(
+            &format!("http://{addr}/bad.bin"),
+            AddOptions {
+                expected_sha256: Some("0".repeat(64)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let snap = wait_for(&m, id, |s| s.checksum == Some(Checksum::Mismatch)).await;
+    assert_eq!(snap.status, Status::Completed);
+    assert_eq!(read_result(tmp.path(), &snap), *body, "file is kept");
+    assert_eq!(
+        next_event(&mut events).await,
+        Event::ChecksumMismatch {
+            id,
+            file_name: "test.bin".into()
+        }
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rejects_malformed_checksum() {
+    let tmp = tempfile::tempdir().unwrap();
+    let m = manager(tmp.path());
+    for bad in ["abc".to_string(), "g".repeat(64), "a".repeat(65)] {
+        let res = m.add_with(
+            "http://127.0.0.1:9/x",
+            AddOptions {
+                expected_sha256: Some(bad.clone()),
+                ..Default::default()
+            },
+        );
+        assert!(res.is_err(), "{bad} should be rejected");
+    }
+    assert!(m.snapshot().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn events_for_failures_but_not_pauses() {
+    let tmp = tempfile::tempdir().unwrap();
+    let body = data(24 * 1024 * 1024);
+    let addr = serve(body.clone(), true, Duration::from_millis(4)).await;
+    let m = manager(tmp.path());
+    let mut events = m.subscribe();
+
+    // Pausing or removing a running download is not an event.
+    let id = m
+        .add(&format!("http://{addr}/slow.bin"), None, None)
+        .unwrap();
+    wait_for(&m, id, |s| s.downloaded > 1024 * 1024).await;
+    m.pause(id);
+    wait_for(&m, id, |s| s.status == Status::Paused && s.connections == 0).await;
+    m.resume(id);
+    wait_for(&m, id, |s| s.status == Status::Downloading).await;
+    m.remove(id, true);
+
+    // A failure is.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let dead = listener.local_addr().unwrap();
+    drop(listener);
+    let bad = m
+        .add(&format!("http://{dead}/nothing"), None, None)
+        .unwrap();
+    match next_event(&mut events).await {
+        Event::Failed { id, .. } => assert_eq!(id, bad),
+        other => panic!("unexpected event {other:?}"),
+    }
+}
+
+// ---------- Scheduler ----------
+
+fn minute_now() -> u32 {
+    use chrono::Timelike;
+    let t = chrono::Local::now();
+    t.hour() * 60 + t.minute()
+}
+
+/// A window that starts two hours from now: downloading is not allowed.
+fn closed_schedule() -> Schedule {
+    let m = minute_now();
+    Schedule {
+        enabled: true,
+        start: (m + 120) % 1440,
+        end: (m + 180) % 1440,
+        days: [true; 7],
+    }
+}
+
+/// A window around the current time (may cross midnight).
+fn open_schedule() -> Schedule {
+    let m = minute_now();
+    Schedule {
+        enabled: true,
+        start: (m + 1440 - 60) % 1440,
+        end: (m + 60) % 1440,
+        days: [true; 7],
+    }
+}
+
+fn set_schedule(m: &Manager, schedule: Schedule) {
+    m.set_settings(Settings {
+        schedule,
+        ..m.settings()
+    });
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn schedule_holds_queue_until_window_opens() {
+    let tmp = tempfile::tempdir().unwrap();
+    let body = data(3 * 1024 * 1024);
+    let addr = serve(body.clone(), true, Duration::ZERO).await;
+    let m = manager(tmp.path());
+    set_schedule(&m, closed_schedule());
+    let id = m
+        .add(&format!("http://{addr}/later.bin"), None, None)
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let snap = m.snapshot().into_iter().find(|s| s.id == id).unwrap();
+    assert_eq!(snap.status, Status::Queued);
+    assert!(snap.waiting_for_schedule);
+    assert_eq!(snap.downloaded, 0);
+
+    set_schedule(&m, open_schedule());
+    let snap = wait_for(&m, id, |s| s.status == Status::Completed).await;
+    assert!(!snap.waiting_for_schedule);
+    assert_eq!(read_result(tmp.path(), &snap), *body);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn schedule_end_requeues_running_downloads_and_resumes_later() {
+    let tmp = tempfile::tempdir().unwrap();
+    let body = data(24 * 1024 * 1024);
+    let addr = serve(body.clone(), true, Duration::from_millis(4)).await;
+    let m = manager(tmp.path());
+    set_schedule(&m, open_schedule());
+    let id = m
+        .add(&format!("http://{addr}/night.bin"), None, None)
+        .unwrap();
+    wait_for(&m, id, |s| s.downloaded > 3 * 1024 * 1024).await;
+
+    // The window closes: the download goes back to the queue, not to Paused.
+    set_schedule(&m, closed_schedule());
+    let stopped = wait_for(&m, id, |s| {
+        assert_ne!(s.status, Status::Paused);
+        s.status == Status::Queued && s.connections == 0 && s.waiting_for_schedule
+    })
+    .await;
+    assert!(stopped.downloaded > 0 && stopped.downloaded < body.len() as u64);
+    assert!(!stopped.segments.is_empty(), "progress is kept");
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let snap = m.snapshot().into_iter().find(|s| s.id == id).unwrap();
+    assert_eq!(snap.status, Status::Queued, "stays queued while closed");
+    assert_eq!(snap.downloaded, stopped.downloaded);
+
+    // The window opens again: it continues where it stopped.
+    set_schedule(&m, open_schedule());
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let s = m.snapshot().into_iter().find(|s| s.id == id).unwrap();
+        assert!(
+            s.downloaded >= stopped.downloaded,
+            "restarted from scratch: {s:?}"
+        );
+        if s.status == Status::Completed {
+            assert_eq!(read_result(tmp.path(), &s), *body);
+            break;
+        }
+        assert_ne!(s.status, Status::Failed, "{:?}", s.error);
+        assert!(Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn force_start_ignores_schedule() {
+    let tmp = tempfile::tempdir().unwrap();
+    let body = data(2 * 1024 * 1024 + 9);
+    let addr = serve(body.clone(), true, Duration::ZERO).await;
+    let m = manager(tmp.path());
+    set_schedule(&m, closed_schedule());
+    let waiting = m.add(&format!("http://{addr}/a.bin"), None, None).unwrap();
+    let forced = m.add(&format!("http://{addr}/b.bin"), None, None).unwrap();
+    m.force_start(forced);
+    let snap = wait_for(&m, forced, |s| s.status == Status::Completed).await;
+    assert_eq!(read_result(tmp.path(), &snap), *body);
+    let other = m.snapshot().into_iter().find(|s| s.id == waiting).unwrap();
+    assert_eq!(other.status, Status::Queued);
+    assert!(other.waiting_for_schedule);
 }

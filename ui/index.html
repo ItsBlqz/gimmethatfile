@@ -108,6 +108,11 @@
           <!-- add:speed -->
           <!-- /add:speed -->
           <!-- add:checksum -->
+          <label class="field">
+            <span>SHA-256 checksum <em id="add-sha-note">· optional, checked when the download finishes</em></span>
+            <input type="text" id="add-sha" data-add="expected_sha256" placeholder="64 hexadecimal characters" spellcheck="false" autocomplete="off" />
+          </label>
+          <p class="error-text hidden" id="add-sha-error"></p>
           <!-- /add:checksum -->
         </div>
       </details>
@@ -155,9 +160,45 @@
         <!-- /section:speed -->
 
         <!-- section:behavior -->
+        <section class="settings-section">
+          <h4>Behavior</h4>
+          <label class="check">
+            <input type="checkbox" data-setting="notify_on_complete" />
+            <span>Notify me when a download finishes or fails</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-setting="minimize_to_tray" />
+            <span>Minimize to the tray instead of the taskbar</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-setting="start_with_windows" />
+            <span>Start with Windows, hidden in the tray</span>
+          </label>
+        </section>
         <!-- /section:behavior -->
 
         <!-- section:schedule -->
+        <section class="settings-section">
+          <h4>Schedule</h4>
+          <label class="check">
+            <input type="checkbox" id="sched-enabled" />
+            <span>Only download during set hours</span>
+          </label>
+          <fieldset class="schedule-body" id="sched-body">
+            <div class="grid2">
+              <label class="field">
+                <span>From</span>
+                <input type="time" id="sched-start" />
+              </label>
+              <label class="field">
+                <span>Until</span>
+                <input type="time" id="sched-end" />
+              </label>
+            </div>
+            <div class="days" id="sched-days" role="group" aria-label="Days"></div>
+            <p class="hint" id="sched-hint"></p>
+          </fieldset>
+        </section>
         <!-- /section:schedule -->
 
         <!-- section:browser -->
@@ -203,6 +244,9 @@
         </div>
       </div>
       <div class="row-actions">
+        <button class="icon-btn act-start hidden" title="Start now, ignoring the schedule">
+          <svg viewBox="0 0 24 24"><path d="M13 3 5 13.5h6L10 21l8-10.5h-6Z"/></svg>
+        </button>
         <button class="icon-btn act-toggle"></button>
         <button class="icon-btn act-folder" title="Show in folder">
           <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
