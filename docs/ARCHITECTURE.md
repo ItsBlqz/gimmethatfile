@@ -22,6 +22,7 @@ web view.
 | `types.rs` | Serializable types: `DownloadRecord` (persisted), `Snapshot` (sent to the UI), `Settings`. |
 | `probe.rs` | Sends `Range: bytes=0-0` to learn size, range support, file name, ETag. |
 | `naming.rs` | File name from `Content-Disposition` or the URL; sanitizing; unique names. |
+| `headers.rs` | Per-download request headers (cookies, referrer, ...): which are allowed, merging. |
 | `job.rs` | One running download: segments, workers, work stealing, adaptive connections. |
 | `manager.rs` | List of downloads, queue/scheduler, pause/resume/remove, state file, speed ticker. |
 | `fsutil.rs` | Positional writes (`seek_write`/`write_at`) and sparse files on NTFS. |
@@ -92,6 +93,44 @@ were running when the app quit are reloaded as `Queued` and continue on their ow
 The partial file is `<name>.gtfpart`, pre-sized and marked sparse on Windows,
 because NTFS would otherwise zero-fill everything before a far-away write.
 
+## Browser integration
+
+```
+browser ──onCreated──▶ extension ──POST /v1/ping──▶ app (src/browser.rs, 127.0.0.1:47811)
+   ▲   pause                │  ──POST /v1/downloads──▶ Manager::add_with(url, AddOptions{headers,..})
+   └── cancel + erase ◀─────┘ (only after 201; otherwise resume / restart in the browser)
+```
+
+**Extension** (`extension/background.js`). On `downloads.onCreated` it skips
+non-http(s) URLs, its own fallback downloads, private windows and whatever the
+options filter out. It then **pauses** the browser download (so it doesn't
+keep writing), pings the app (1.5 s timeout), and posts the URL, the browser's
+suggested file name (`onDeterminingFilename` in Chrome), the referrer and the
+cookies (`cookies.getAll`) for the URL. The browser's User-Agent is added only
+when cookies are sent. Only after the app answers `201` does it cancel and
+erase the browser download; on any other outcome it resumes it, or starts it
+again if it can't be resumed. Invariant: **the browser download is cancelled
+only after the app has accepted it.**
+
+**Receiver** (`app/src/browser.rs`). `tiny_http` on its own thread, bound to
+`127.0.0.1:47811`. If the port is taken it logs and stays off; the app works as
+usual. All checks are in `route()` and `to_add_options()`, which are unit
+tested: `Host` must be ours, `Origin` must be `chrome-extension://…` or
+`moz-extension://…`, the add endpoint takes only JSON up to 64 KiB with an
+http(s) URL. The ping and add endpoints accept POST because Chrome omits
+`Origin` on extension GET requests. With `Settings.browser_capture` off, ping
+reports `capture: false` and adds answer `409`. On success the app emits a
+`browser-added` event; the UI shows a toast without focusing the window.
+
+**Engine.** `AddOptions.headers` go through `headers::sanitize` and are stored
+in `DownloadRecord.headers` (persisted, so resume works). `Inner::drive`
+builds a separate `reqwest::Client` with those headers as default headers for a
+download that has any, so the probe, every ranged connection and the
+single-connection fallback all send them, and `probe.rs`/`job.rs` stay unaware
+of them. A provided `User-Agent` replaces the engine's. reqwest removes
+`Cookie`/`Authorization` on redirects to another host. `GTF_DEBUG` logs header
+names only.
+
 ## Testing
 
 - Unit tests sit next to the code (`#[cfg(test)]`).
@@ -99,3 +138,8 @@ because NTFS would otherwise zero-fill everything before a far-away write.
   range support on and off, slow responses down, limit connections with `429`,
   and answer `bytes=0-` with a plain `200`, like some CDNs. When you hit a
   server behavior in the wild, reproduce it there first.
+- `crates/engine/tests/headers.rs` checks that per-download headers reach every
+  request, using a server that answers `403` without the right cookie.
+- `extension/test` (Playwright, `npm test`) loads the extension into Chromium
+  and runs it against the real app: capture, fallbacks, and that web pages
+  can't use the receiver.

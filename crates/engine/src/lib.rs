@@ -1,6 +1,7 @@
 //! Gimme That File engine: multi-connection, resumable HTTP downloads.
 
 mod fsutil;
+mod headers;
 mod job;
 mod manager;
 pub mod naming;

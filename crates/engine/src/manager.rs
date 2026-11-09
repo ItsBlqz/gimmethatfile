@@ -1,4 +1,5 @@
 use crate::fsutil;
+use crate::headers;
 use crate::job::{self, Cancelled, Job, StopReason};
 use crate::naming::{self, PART_EXT};
 use crate::probe;
@@ -54,6 +55,27 @@ struct Persisted {
     downloads: Vec<DownloadRecord>,
     #[serde(default)]
     next_id: DownloadId,
+}
+
+/// HTTP client with the engine's defaults plus `extra` request headers,
+/// which are then sent with every request made through it (including
+/// redirects to the same host; reqwest drops Cookie/Authorization when a
+/// redirect leaves the host).
+fn build_client(extra: &[(String, String)]) -> Result<Client> {
+    let mut defaults = reqwest::header::HeaderMap::new();
+    defaults.insert(
+        reqwest::header::USER_AGENT,
+        reqwest::header::HeaderValue::from_static(USER_AGENT),
+    );
+    // A browser-provided User-Agent replaces ours.
+    defaults.extend(headers::to_map(extra));
+    Ok(Client::builder()
+        .default_headers(defaults)
+        .connect_timeout(Duration::from_secs(15))
+        .read_timeout(Duration::from_secs(30))
+        .pool_max_idle_per_host(32)
+        .tcp_nodelay(true)
+        .build()?)
 }
 
 fn now() -> u64 {
@@ -118,13 +140,7 @@ impl Manager {
             })
             .collect();
 
-        let client = Client::builder()
-            .user_agent(USER_AGENT)
-            .connect_timeout(Duration::from_secs(15))
-            .read_timeout(Duration::from_secs(30))
-            .pool_max_idle_per_host(32)
-            .tcp_nodelay(true)
-            .build()?;
+        let client = build_client(&[])?;
 
         let inner = Arc::new(Inner {
             client,
@@ -194,7 +210,7 @@ impl Manager {
                     .as_deref()
                     .map(naming::sanitize)
                     .filter(|n| n != "download"),
-                headers: opts.headers,
+                headers: headers::sanitize(opts.headers),
                 speed_limit: opts.speed_limit.filter(|&l| l > 0),
                 expected_sha256: opts
                     .expected_sha256
@@ -571,11 +587,23 @@ impl Inner {
 
     async fn drive(self: &Arc<Self>, id: DownloadId, job: &Arc<Job>) -> Result<()> {
         let rec = self.record(id).ok_or(Cancelled)?;
+        // Downloads with their own headers (cookies, ...) get their own
+        // client so those headers go out with every request; the rest share one.
+        let client = if rec.headers.is_empty() {
+            self.client.clone()
+        } else {
+            if std::env::var_os("GTF_DEBUG").is_some() {
+                // Names only: values may be cookies or tokens.
+                let names: Vec<_> = rec.headers.iter().map(|(n, _)| n.as_str()).collect();
+                eprintln!("[gtf] download {id}: extra headers {names:?}");
+            }
+            build_client(&rec.headers)?
+        };
         let mut attempt = 0u64;
         let info = loop {
             let res = tokio::select! {
                 _ = job.cancel.cancelled() => return Err(Cancelled.into()),
-                r = probe::probe(&self.client, &rec.url) => r,
+                r = probe::probe(&client, &rec.url) => r,
             };
             match res {
                 Ok(info) => break info,
@@ -668,7 +696,7 @@ impl Inner {
 
         if ranged {
             job::download_ranged(
-                self.client.clone(),
+                client.clone(),
                 rec.url.clone(),
                 file.clone(),
                 job.clone(),
@@ -677,13 +705,8 @@ impl Inner {
             .await?;
             fsutil::set_sparse(&file, false);
         } else {
-            job::download_single(
-                self.client.clone(),
-                rec.url.clone(),
-                file.clone(),
-                job.clone(),
-            )
-            .await?;
+            job::download_single(client.clone(), rec.url.clone(), file.clone(), job.clone())
+                .await?;
         }
         file.sync_all().ok();
         drop(file);

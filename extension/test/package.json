@@ -1,0 +1,13 @@
+{
+  "name": "gimmethatfile-extension-tests",
+  "private": true,
+  "description": "End-to-end tests for the browser extension against the real app",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "icons": "node make-icons.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0"
+  }
+}

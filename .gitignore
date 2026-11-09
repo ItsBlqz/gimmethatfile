@@ -2,3 +2,6 @@
 /app/gen
 *.gtfpart
 .DS_Store
+extension/test/node_modules/
+extension/test/test-results/
+extension/test/playwright-report/

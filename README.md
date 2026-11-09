@@ -55,8 +55,27 @@ tested on Linux; you can [build from source](#building-from-source).
   servers are sanitized.
 - **Small and quick**: about a 2 MB installer, using the system WebView instead
   of a bundled browser.
+- **Browser integration**: an extension for Chrome and Edge sends your
+  browser's downloads to the app, including downloads that need a login.
 - Paste links anywhere (`Ctrl+V`), drag links onto the window, `Ctrl+N` to add.
   Light, dark, or follow your system.
+
+## Browser integration
+
+The extension in [`extension/`](extension/) catches downloads in Chrome and
+Edge and hands them to the app. Until it is in the stores, install it with
+**Load unpacked** (steps in [extension/README.md](extension/README.md)).
+
+- New downloads go to the app when it is running. If it isn't, or you turned
+  off **Settings → Browser → Accept downloads sent by the browser extension**,
+  the browser downloads the file as usual. Nothing gets lost.
+- Downloads that need a login work: the extension passes along the site's
+  cookies, the referring page and the file name. The app stores them in its
+  local download list (`downloads.json`) so the download can be resumed later.
+- Options for minimum size, file types and sites to skip; a toolbar switch; and
+  **Download with Gimme That File** in the right-click menu on links.
+- The app listens on `127.0.0.1:47811` and only answers browser extensions, not
+  web pages. See [SECURITY.md](SECURITY.md).
 
 ## How it works
 
@@ -130,13 +149,15 @@ crates/engine/      Download engine (no UI, fully tested)
   tests/e2e.rs        End-to-end tests against an in-process HTTP server
   examples/           get (CLI download), bench (reproducible benchmark)
 app/                Tauri v2 desktop shell
+  src/browser.rs      Local receiver for the browser extension
+extension/          Browser extension (Manifest V3) and its Playwright tests
 ui/                 Plain HTML/CSS/JS front end (no build step)
 docs/               Architecture and benchmarks
 ```
 
 ## Roadmap
 
-Next up: browser download capture, throughput-aware connection count, speed
+Next up: throughput-aware connection count, speed
 limits, notifications and auto-update. The full list is in [TODO.md](TODO.md).
 Ideas and votes are welcome in [issues](https://github.com/ItsBlqz/gimmethatfile/issues).
 

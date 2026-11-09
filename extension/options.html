@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Gimme That File: options</title>
+  <link rel="stylesheet" href="ui.css" />
+</head>
+<body class="options">
+  <main>
+    <div class="brand">
+      <img src="icons/48.png" alt="" />
+      <h1>Gimme That File</h1>
+      <span class="saved" id="saved">Saved</span>
+    </div>
+
+    <form class="card" id="form">
+      <h2>Which downloads to send to the app</h2>
+      <label class="switch row">
+        <span>Send browser downloads to Gimme That File</span>
+        <input type="checkbox" name="enabled" />
+        <span class="track"></span>
+      </label>
+      <label class="field">
+        <span>Minimum file size (MB)</span>
+        <input type="number" name="minSizeMB" min="0" step="0.1" placeholder="0" />
+        <p class="hint">Smaller downloads stay in the browser. 0 sends everything. Downloads with unknown size are always sent.</p>
+      </label>
+      <label class="field">
+        <span>Only these file types</span>
+        <input type="text" name="includeExt" placeholder="e.g. zip iso exe mp4 (empty = all)" spellcheck="false" />
+      </label>
+      <label class="field">
+        <span>Never these file types</span>
+        <input type="text" name="excludeExt" placeholder="e.g. pdf jpg" spellcheck="false" />
+      </label>
+      <label class="field">
+        <span>Sites to skip</span>
+        <textarea name="skipSites" placeholder="One per line, e.g. example.com (subdomains included)" spellcheck="false"></textarea>
+        <p class="hint">Matches the site of the file or of the page it was downloaded from.</p>
+      </label>
+    </form>
+
+    <div class="card">
+      <h2>Good to know</h2>
+      <p class="hint">If the app isn't running, or capture is off in its settings, the browser downloads the file as usual. Private windows are never captured. Right-click a link and choose “Download with Gimme That File” to send it by hand.</p>
+      <p class="hint">Cookies for the file's site are sent to the app so downloads that need a login work, and are kept in the app's local download list so they can be resumed.</p>
+    </div>
+  </main>
+  <script src="common.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

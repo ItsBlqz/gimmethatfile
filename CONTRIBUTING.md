@@ -65,6 +65,8 @@ Also:
 - **Add a test** for any engine behavior change. If you're fixing a server
   quirk, teach the test server in `crates/engine/tests/e2e.rs` to behave the
   same way, and show that the test fails without your fix.
+- If you change the browser extension or `app/src/browser.rs`, also run the
+  extension tests (`npm test` in `extension/test`, see its README).
 - **Keep the engine free of UI code.** Anything the UI needs goes through
   `Manager` and `Snapshot`.
 - **Update `CHANGELOG.md`** under `Unreleased` if users will notice the change.

@@ -26,6 +26,46 @@ Areas we especially care about:
 - A server making the app run or open a file without the user asking.
 - Corrupted downloads reported as complete.
 - Anything that lets web content in the UI reach Tauri commands it shouldn't.
+- Anything that lets a web page talk to the browser receiver (below).
+
+## Browser receiver
+
+The app listens on `http://127.0.0.1:47811` so the browser extension can hand
+it downloads. It is built so that only browser extensions can use it:
+
+- It binds to `127.0.0.1` only, so other computers can't reach it.
+- Every request needs an `Origin` header of `chrome-extension://…` or
+  `moz-extension://…`. Browsers always attach a web page's real origin to its
+  requests and don't let pages change it, so web pages are refused (`403`),
+  and so are requests without an origin.
+- The `Host` header must be `127.0.0.1:47811` or `localhost:47811`, which blocks
+  DNS-rebinding attacks.
+- CORS headers are only ever sent to extension origins, and only those get an
+  answer to a CORS preflight. A page therefore can't read replies, not even
+  whether the app is running.
+- Adding a download requires `Content-Type: application/json` (which a page
+  can't send cross-origin without a preflight), a body of at most 64 KiB, and an
+  `http`/`https` URL.
+- With **Settings → Browser → Accept downloads sent by the browser extension**
+  turned off, it adds nothing and the extension leaves downloads to the browser.
+
+Programs running on your computer can still fake an extension origin. That is
+out of scope: local programs can already do anything your user account can.
+
+### Cookies
+
+To download files behind a login, the extension sends the browser's cookies for
+the file's site (and then the browser's User-Agent) to the app. They are:
+
+- sent only with requests for that download; when a redirect leaves the site,
+  `Cookie` and `Authorization` are dropped;
+- stored in plain text in the local download list (`downloads.json` in the
+  app's data folder) so a paused or interrupted download can resume. Removing a
+  download from the list removes them;
+- never written to the `GTF_DEBUG` log (only header names are).
+
+Headers that would change how the app talks to the server (`Host`, `Range`,
+`Accept-Encoding`, `Connection`, `Content-Length` and similar) are ignored.
 
 Downloaded files themselves are untrusted. Gimme That File doesn't scan them,
 so scan files from sources you don't trust.

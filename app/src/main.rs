@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod browser;
+
 use gtf_engine::{AddOptions, DownloadId, Manager, Settings, Snapshot, Status};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -277,6 +279,7 @@ fn main() {
             })?;
             app.manage(App(manager.clone()));
             build_tray(app)?;
+            browser::start(manager.clone(), app.handle().clone());
 
             // Push live progress to the UI.
             let handle = app.handle().clone();

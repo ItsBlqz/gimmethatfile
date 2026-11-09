@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Browser extension for Chrome and Edge (`extension/`, load unpacked for now)
+  that sends browser downloads to the app, with a toolbar switch, connection
+  status, filters (minimum size, file types, sites to skip), "let the next
+  download through", and a **Download with Gimme That File** context-menu item.
+  If the app isn't running or capture is off, the browser downloads the file
+  itself.
+- The app receives those downloads on `127.0.0.1:47811`, answering only
+  browser extensions. **Settings → Browser** turns this off. A small
+  notification shows what was added, without bringing the window forward.
+- Per-download request headers: cookies, referrer and User-Agent from the
+  browser are sent with every request of that download (probe and all
+  connections), so downloads behind a login work. They are stored in the local
+  download list so resuming works too.
+
 ## [0.1.0] - 2026-11-08
 
 First release.

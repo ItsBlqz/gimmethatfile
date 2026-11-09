@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Gimme That File</title>
+  <link rel="stylesheet" href="ui.css" />
+</head>
+<body class="popup">
+  <main>
+    <div class="brand">
+      <img src="icons/48.png" alt="" />
+      <h1>Gimme That File</h1>
+    </div>
+
+    <div class="card">
+      <label class="switch">
+        <span>Send downloads to the app</span>
+        <input type="checkbox" id="enabled" />
+        <span class="track"></span>
+      </label>
+    </div>
+
+    <div class="card status" id="status" data-state="checking">
+      <span class="dot"></span>
+      <div>
+        <div id="status-title">Looking for the app…</div>
+        <div class="hint" id="status-hint"></div>
+      </div>
+    </div>
+  </main>
+  <footer>
+    <button class="btn link" id="skip-next" title="The next download is handled by the browser">Let the next download through</button>
+    <button class="btn link" id="options">Options</button>
+  </footer>
+  <script src="common.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

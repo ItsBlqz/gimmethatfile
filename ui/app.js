@@ -515,4 +515,6 @@ syncMaxButton();
     items = ev.payload;
     render();
   });
+  // Sent by the browser extension; the window is not brought to the front.
+  await listen("browser-added", (ev) => toast(`Added from browser: ${ev.payload.name}`));
 })();
