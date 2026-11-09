@@ -11,7 +11,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicU64, Ordering, Ordering::Relaxed};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::runtime::Handle;
@@ -480,12 +480,19 @@ impl Manager {
             .map(|e| {
                 let r = &e.rec;
                 let (downloaded, segments, speed, connections) = match &e.job {
-                    Some(j) if j.is_initialized() => (
-                        j.downloaded.load(Relaxed),
-                        j.ranges(),
-                        j.speed.lock().value,
-                        j.workers.load(Relaxed),
-                    ),
+                    Some(j) if j.is_initialized() => {
+                        // Read the connection count first: a connection only
+                        // leaves the count after its last write (Release), so
+                        // "0 connections" here guarantees `downloaded` below
+                        // includes every byte written.
+                        let workers = j.workers.load(Ordering::Acquire);
+                        (
+                            j.downloaded.load(Relaxed),
+                            j.ranges(),
+                            j.speed.lock().value,
+                            workers,
+                        )
+                    }
                     Some(j) => (
                         r.downloaded,
                         r.segments.clone(),

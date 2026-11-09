@@ -17,7 +17,10 @@ use reqwest::{header, Client, StatusCode};
 use std::fmt;
 use std::fs::File;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering::Relaxed};
+use std::sync::atomic::{
+    AtomicBool, AtomicU32, AtomicU64, AtomicU8,
+    Ordering::{Relaxed, Release},
+};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
@@ -339,7 +342,7 @@ impl Job {
         while w > target {
             match self
                 .workers
-                .compare_exchange_weak(w, w - 1, Relaxed, Relaxed)
+                .compare_exchange_weak(w, w - 1, Release, Relaxed)
             {
                 Ok(_) => return true,
                 Err(now) => w = now,
@@ -583,7 +586,7 @@ async fn worker(ctx: Arc<Ctx>) -> anyhow::Result<()> {
     struct Count<'a>(&'a AtomicU32);
     impl Drop for Count<'_> {
         fn drop(&mut self) {
-            self.0.fetch_sub(1, Relaxed);
+            self.0.fetch_sub(1, Release);
         }
     }
     ctx.job.workers.fetch_add(1, Relaxed);
@@ -815,7 +818,7 @@ async fn single_once(client: &Client, url: &str, file: &File, job: &Job) -> anyh
     struct Count<'a>(&'a AtomicU32);
     impl Drop for Count<'_> {
         fn drop(&mut self) {
-            self.0.fetch_sub(1, Relaxed);
+            self.0.fetch_sub(1, Release);
         }
     }
     let _count = Count(&job.workers);
