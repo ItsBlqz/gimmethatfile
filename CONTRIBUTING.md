@@ -19,7 +19,7 @@ docs and code are all welcome.
 
 You need:
 
-- [Rust](https://rustup.rs), stable, 1.90 or newer
+- [Rust](https://rustup.rs), stable, 1.95 or newer
 - **Windows:** Visual Studio Build Tools (the "Desktop development with C++"
   workload). WebView2 is already part of Windows 10/11.
 - **Linux:** the [Tauri system dependencies](https://v2.tauri.app/start/prerequisites/#linux),

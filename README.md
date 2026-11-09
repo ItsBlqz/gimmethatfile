@@ -101,7 +101,7 @@ connection already fills your line, extra connections don't help. See
 
 ## Building from source
 
-Requirements: [Rust](https://rustup.rs) 1.90+. On Windows, the Visual Studio
+Requirements: [Rust](https://rustup.rs) 1.95+. On Windows, the Visual Studio
 Build Tools (C++ workload); WebView2 ships with Windows 10/11. On Linux, the
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/#linux).
 

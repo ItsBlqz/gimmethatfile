@@ -29,7 +29,7 @@
           { "context": "Lint" },
           { "context": "Test (ubuntu-latest)" },
           { "context": "Test (windows-latest)" },
-          { "context": "MSRV (1.90)" },
+          { "context": "MSRV" },
           { "context": "Build app (Windows)" }
         ]
       }
