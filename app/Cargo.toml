@@ -22,3 +22,8 @@ gtf-engine = { path = "../crates/engine" }
 # Local receiver for the browser extension (src/browser.rs).
 tiny_http = "0.12"
 url = "2"
+tauri-plugin-notification = "2"
+auto-launch = "0.6"
+
+[target."cfg(windows)".dependencies]
+windows-registry = "0.6"

@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod autostart;
 mod browser;
+mod notify;
 
 use gtf_engine::{AddOptions, DownloadId, Manager, Settings, Snapshot, Status};
 use std::path::{Path, PathBuf};
@@ -70,6 +72,12 @@ fn resume(app: State<App>, id: DownloadId) {
     app.0.resume(id)
 }
 
+/// Start now, even outside the scheduled hours.
+#[tauri::command]
+fn force_start(app: State<App>, id: DownloadId) {
+    app.0.force_start(id)
+}
+
 #[tauri::command]
 fn pause_all(app: State<App>) {
     app.0.pause_all()
@@ -96,8 +104,20 @@ fn get_settings(app: State<App>) -> Settings {
 }
 
 #[tauri::command]
-fn set_settings(app: State<App>, settings: Settings) {
-    app.0.set_settings(settings)
+fn set_settings(app: State<App>, settings: Settings) -> Result<(), String> {
+    let start_with_windows = settings.start_with_windows;
+    app.0.set_settings(settings);
+    // Keep the startup entry in line with the setting. On failure, store
+    // what is actually registered so the checkbox doesn't lie.
+    if start_with_windows != autostart::is_enabled() {
+        if let Err(e) = autostart::set(start_with_windows) {
+            let mut s = app.0.settings();
+            s.start_with_windows = autostart::is_enabled();
+            app.0.set_settings(s);
+            return Err(e);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -255,10 +275,13 @@ fn main() {
     tauri::Builder::default()
         // Must be first: a second launch just shows the running instance
         // (which may be hidden in the tray) instead of starting another one.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            show_main(app);
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !autostart::launched_hidden(&args) {
+                show_main(app);
+            }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .on_window_event(|window, event| {
             // The close button hides to the tray; downloads keep running.
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -280,6 +303,13 @@ fn main() {
             app.manage(App(manager.clone()));
             build_tray(app)?;
             browser::start(manager.clone(), app.handle().clone());
+            notify::spawn(app.handle().clone(), manager.clone(), show_main);
+
+            // The window starts invisible (tauri.conf.json) so that a launch
+            // at sign-in can stay in the tray without a flash.
+            if !autostart::launched_hidden(std::env::args()) {
+                show_main(app.handle());
+            }
 
             // Push live progress to the UI.
             let handle = app.handle().clone();
@@ -305,6 +335,7 @@ fn main() {
             add_downloads,
             pause,
             resume,
+            force_start,
             pause_all,
             resume_all,
             remove,

@@ -111,10 +111,12 @@ function render() {
   const speed = items.reduce((s, d) => s + (d.status === "downloading" ? d.speed : 0), 0);
   $("#speed-value").textContent = fmtSpeed(speed);
   const running = items.filter((d) => d.status === "downloading" || d.status === "connecting").length;
-  const queued = items.filter((d) => d.status === "queued").length;
+  const queued = items.filter((d) => d.status === "queued" && !d.waiting_for_schedule).length;
+  const waiting = items.filter((d) => d.waiting_for_schedule).length;
   const parts = [];
   if (running) parts.push(`${running} downloading`);
   if (queued) parts.push(`${queued} queued`);
+  if (waiting) parts.push(`${waiting} waiting for schedule`);
   if (done) parts.push(`${done} completed`);
   $("#summary").textContent = parts.join(" · ");
 }
@@ -123,6 +125,7 @@ function createRow(id) {
   const el = rowTpl.content.firstElementChild.cloneNode(true);
   el.dataset.id = id;
   el.querySelector(".act-toggle").addEventListener("click", () => toggle(id));
+  el.querySelector(".act-start").addEventListener("click", () => call("force_start", { id }).then(refresh));
   el.querySelector(".act-folder").addEventListener("click", () => call("reveal", { id }));
   el.querySelector(".act-remove").addEventListener("click", () => askRemove(id));
   el.addEventListener("dblclick", (e) => {
@@ -142,6 +145,7 @@ function updateRow(el, d) {
   const name = nameOf(d);
   const ext = extOf(name);
   el.dataset.status = d.status;
+  el.dataset.checksum = d.checksum || "";
   setText(el, ".name", name);
   el.querySelector(".name").title = `${name}\n${d.url}`;
 
@@ -174,18 +178,32 @@ function updateRow(el, d) {
   const size = total != null ? `${fmtBytes(d.downloaded)} of ${fmtBytes(total)}` : fmtBytes(d.downloaded);
   let meta;
   switch (d.status) {
-    case "queued": meta = "Queued"; break;
+    case "queued":
+      meta = d.waiting_for_schedule ? "Waiting for schedule" : "Queued";
+      if (d.downloaded) meta += ` · ${size}`;
+      break;
     case "connecting": meta = d.downloaded ? `Reconnecting… · ${size}` : "Connecting…"; break;
     case "downloading":
       meta = [size, fmtSpeed(d.speed), fmtEta(d.eta)].filter(Boolean).join(" · ");
       break;
     case "paused": meta = `Paused · ${size}`; break;
     case "failed": meta = `<span class="err">Failed</span> · ${escapeHtml(d.error || "unknown error")}`; break;
-    case "completed": meta = `<span class="ok">Completed</span> · ${fmtBytes(total ?? d.downloaded)}`; break;
+    case "completed": {
+      const done = fmtBytes(total ?? d.downloaded);
+      if (d.checksum === "mismatch") meta = `<span class="err">⚠ Checksum mismatch</span> · ${done}`;
+      else if (d.checksum === "verifying") meta = `<span class="ok">Completed</span> · ${done} · Verifying checksum…`;
+      else if (d.checksum === "ok") meta = `<span class="ok">Completed</span> · ${done} · <span class="ok">✓ Verified</span>`;
+      else meta = `<span class="ok">Completed</span> · ${done}`;
+      break;
+    }
   }
   const metaEl = el.querySelector(".meta");
   if (metaEl.innerHTML !== meta) metaEl.innerHTML = meta;
-  metaEl.title = d.status === "failed" ? d.error || "" : d.dir;
+  metaEl.title = d.status === "failed" ? d.error || ""
+    : d.checksum === "mismatch" ? `The file doesn't match the SHA-256 checksum you entered. It may be damaged or not the file you expected.\nExpected: ${d.expected_sha256}`
+    : d.checksum === "ok" ? `SHA-256 matches ${d.expected_sha256}\n${d.dir}`
+    : d.dir;
+  el.querySelector(".act-start").classList.toggle("hidden", !d.waiting_for_schedule);
 
   let conns = "";
   if (d.status === "downloading") {
@@ -278,7 +296,29 @@ function updateLinkCount() {
   $("#link-count").textContent = n ? `· ${n} link${n > 1 ? "s" : ""}` : "";
   $("#add-submit").disabled = n === 0;
   $("#add-submit").textContent = n > 1 ? `Download ${n} files` : "Download";
+  validateSha(n);
 }
+
+// SHA-256 field ("More options"): empty, or 64 hex characters. Only used
+// when a single link is added.
+function validateSha(links = extractUrls($("#add-urls").value).length) {
+  const input = $("#add-sha");
+  const value = input.value.trim();
+  const valid = value === "" || /^[0-9a-f]{64}$/i.test(value);
+  const msg = valid ? ""
+    : value.length === 64 ? "A SHA-256 checksum only contains 0–9 and a–f."
+    : `A SHA-256 checksum is 64 characters (0–9, a–f); this one has ${value.length}.`;
+  input.setCustomValidity(msg);
+  input.classList.toggle("invalid", !valid);
+  $("#add-sha-error").textContent = msg;
+  $("#add-sha-error").classList.toggle("hidden", valid);
+  $("#add-sha-note").textContent = links > 1
+    ? "· only used when adding a single link"
+    : "· optional, checked when the download finishes";
+}
+$("#add-sha").addEventListener("input", () => validateSha());
+// An invalid checksum blocks submitting; make sure it's visible.
+$("#add-sha").addEventListener("invalid", () => { $("#add-more").open = true; });
 
 $("#add-urls").addEventListener("input", updateLinkCount);
 $("#add-urls").addEventListener("keydown", (e) => {
@@ -383,6 +423,58 @@ $("#form-settings").addEventListener("submit", async (e) => {
   await call("set_settings", { settings: next });
   settings = (await call("get_settings")) || next;
   dlgSettings.close();
+});
+
+// ---------- schedule settings ----------
+// settings.schedule = { enabled, start, end (minutes after midnight), days: [Mon..Sun] }.
+// end < start means the window runs overnight into the next day.
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const toHm = (min) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+const fromHm = (s) => {
+  const [h, m] = (s || "").split(":").map(Number);
+  return ((h || 0) * 60 + (m || 0)) % 1440;
+};
+const dayInputs = () => [...document.querySelectorAll("#sched-days input")];
+// For the hint, in the same 12/24-hour style as the time inputs.
+const fmtTime = (min) =>
+  new Date(2000, 0, 1, Math.floor(min / 60), min % 60).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+$("#sched-days").innerHTML = DAY_NAMES
+  .map((d, i) => `<label class="day"><input type="checkbox" value="${i}" /><span>${d}</span></label>`)
+  .join("");
+
+function updateScheduleUi() {
+  $("#sched-body").disabled = !$("#sched-enabled").checked;
+  const start = fromHm($("#sched-start").value);
+  const end = fromHm($("#sched-end").value);
+  let hint;
+  if (!dayInputs().some((i) => i.checked)) hint = "Pick at least one day, or downloads will never start.";
+  else if (start === end) hint = "Downloads run all day on the selected days.";
+  else if (end < start) hint = `Runs overnight, from ${fmtTime(start)} until ${fmtTime(end)} the next day.`;
+  else hint = `Downloads run from ${fmtTime(start)} to ${fmtTime(end)}.`;
+  $("#sched-hint").textContent = `${hint} Outside these hours they wait, then continue on their own.`;
+}
+["#sched-enabled", "#sched-start", "#sched-end", "#sched-days"].forEach((sel) =>
+  $(sel).addEventListener("input", updateScheduleUi)
+);
+
+settingsHooks.push({
+  load(s) {
+    const sc = s.schedule || { enabled: false, start: 60, end: 420, days: [true, true, true, true, true, true, true] };
+    $("#sched-enabled").checked = !!sc.enabled;
+    $("#sched-start").value = toHm(sc.start);
+    $("#sched-end").value = toHm(sc.end);
+    dayInputs().forEach((input, i) => { input.checked = !!sc.days?.[i]; });
+    updateScheduleUi();
+  },
+  save(next) {
+    next.schedule = {
+      enabled: $("#sched-enabled").checked,
+      start: fromHm($("#sched-start").value),
+      end: fromHm($("#sched-end").value),
+      days: dayInputs().map((i) => i.checked),
+    };
+  },
 });
 
 // ---------- remove dialog ----------
@@ -492,7 +584,8 @@ applyTheme(currentTheme());
 
 // ---------- window controls (the window has no native frame) ----------
 const appWindow = window.__TAURI__.window.getCurrentWindow();
-$("#win-min").addEventListener("click", () => appWindow.minimize());
+// With "Minimize to the tray" on, minimizing hides the window like closing does.
+$("#win-min").addEventListener("click", () => (settings?.minimize_to_tray ? appWindow.hide() : appWindow.minimize()));
 $("#win-max").addEventListener("click", () => appWindow.toggleMaximize());
 $("#win-close").addEventListener("click", () => appWindow.close());
 

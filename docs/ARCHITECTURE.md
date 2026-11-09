@@ -26,6 +26,7 @@ web view.
 | `job.rs` | One running download: segments, workers, work stealing, adaptive connections. |
 | `manager.rs` | List of downloads, queue/scheduler, pause/resume/remove, state file, speed ticker. |
 | `fsutil.rs` | Positional writes (`seek_write`/`write_at`) and sparse files on NTFS. |
+| `schedule.rs` | Scheduled hours: `Schedule::allows(weekday, minute)` is a pure function of local time. |
 
 ## Lifecycle of a download
 
@@ -46,6 +47,37 @@ Queued ──schedule()──▶ Connecting ──probe ok──▶ Downloading 
    `download_ranged` (range support) or `download_single`.
 4. On success, the part file is renamed to the final name. `Inner::run` records
    the outcome, saves, and calls `schedule()` again.
+
+### Scheduled hours
+
+`Settings.schedule` limits downloading to a daily window on chosen days. The
+window is `[start, end)` in minutes after local midnight; `end < start` crosses
+midnight and belongs to the day it starts on; `start == end` is the whole day.
+
+- `State.schedule_open` caches `Schedule::allows_now()`. `apply_schedule()`
+  recomputes it on every ticker tick (500 ms) and in `set_settings`.
+- While closed, `schedule()` doesn't start `Queued` downloads, and
+  `Snapshot.waiting_for_schedule` is set for them (the UI shows "Waiting for
+  schedule").
+- When the window closes, running downloads get status `Queued` *before* their
+  job is stopped with `StopReason::Pause`. `run` keeps a `Queued` status after
+  a pause-stop, so they are not shown as paused, keep their segments, and
+  restart (resuming) when the window opens.
+- `Manager::force_start` sets `Entry.forced` (not persisted), which ignores
+  the schedule for that download until it is paused or the app restarts.
+
+### Checksums and events
+
+- With `expected_sha256` set, a successful download becomes `Completed` with
+  `checksum: verifying`, frees its slot, and `Inner::verify` hashes the file on
+  a blocking thread (`spawn_blocking`). The result (`ok`/`mismatch`) is
+  persisted. A mismatch keeps the status `Completed`: the file is whole as the
+  server sent it, so it's kept and the UI shows a warning instead of deleting
+  or re-downloading it. Checks interrupted by quitting run again on load.
+- `Manager::subscribe()` is a `broadcast` channel of `Event`s (`Completed`,
+  `ChecksumMismatch`, `Failed`) sent from `run`/`verify`, i.e. only for
+  downloads that finish while the app runs, never for pauses, removals or
+  schedule stops. The app turns them into notifications (`app/src/notify.rs`).
 
 ## Segmented downloading (`job.rs`)
 

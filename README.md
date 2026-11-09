@@ -49,7 +49,14 @@ tested on Linux; you can [build from source](#building-from-source).
   changes on the server, the app notices and restarts it.
 - **Queue**: choose how many downloads run at once.
 - **Lives in the tray**: closing the window keeps downloads running. Quit from
-  the tray icon.
+  the tray icon. Optionally minimize to the tray too, and start with Windows
+  (hidden in the tray).
+- **Scheduler**: only download during set hours on chosen days, overnight
+  windows like 23:00–07:00 included. Outside them, downloads wait and continue
+  on their own; "Start now" runs one anyway.
+- **SHA-256 check**: paste the expected checksum when adding a download, and
+  the file is verified when it finishes.
+- **Notifications** when a download finishes or fails.
 - **Safe by default**: downloads go to `name.ext.gtfpart` and are renamed only
   when complete. Existing files are never overwritten, and file names from
   servers are sanitized.

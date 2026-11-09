@@ -21,6 +21,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   browser are sent with every request of that download (probe and all
   connections), so downloads behind a login work. They are stored in the local
   download list so resuming works too.
+- Notifications when a download finishes, fails, or fails its checksum
+  (Settings → Behavior). Clicking one shows the window.
+- Setting: the minimize button hides the window to the tray.
+- Setting: start with Windows, hidden in the tray (`--hidden`).
+- Optional SHA-256 checksum in the add dialog ("More options"), verified after
+  the download finishes. A mismatch is flagged in red; the file is kept.
+- Scheduler: only download during set hours on chosen days, including
+  windows that cross midnight. Downloads outside the window show "Waiting for
+  schedule", keep their progress, and continue automatically; "Start now"
+  runs a single download anyway.
 
 ## [0.1.0] - 2026-11-08
 

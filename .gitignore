@@ -5,3 +5,4 @@
 extension/test/node_modules/
 extension/test/test-results/
 extension/test/playwright-report/
+/.claude/

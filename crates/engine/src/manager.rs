@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::runtime::Handle;
+use tokio::sync::broadcast;
 use url::Url;
 
 // An honest UA on purpose: pretending to be Chrome without Chrome's TLS
@@ -33,18 +34,23 @@ struct Inner {
     save_lock: Mutex<()>,
     rt: Handle,
     version: AtomicU64,
+    events: broadcast::Sender<Event>,
 }
 
 struct State {
     settings: Settings,
     entries: Vec<Entry>,
     next_id: DownloadId,
+    /// Inside the scheduled hours (always true without a schedule).
+    schedule_open: bool,
 }
 
 struct Entry {
     rec: DownloadRecord,
     /// Present while the download is running.
     job: Option<Arc<Job>>,
+    /// Started by the user with "Start now": ignores the schedule.
+    forced: bool,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -83,6 +89,32 @@ fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// File name for messages, falling back to the URL.
+fn display_name(rec: &DownloadRecord) -> String {
+    rec.file_name.clone().unwrap_or_else(|| rec.url.clone())
+}
+
+/// Lowercase hex SHA-256 of a file.
+fn sha256_file(path: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 fn same_name(a: &str, b: &str) -> bool {
@@ -136,26 +168,49 @@ impl Manager {
                 if matches!(rec.status, Status::Connecting | Status::Downloading) {
                     rec.status = Status::Queued;
                 }
-                Entry { rec, job: None }
+                Entry {
+                    rec,
+                    job: None,
+                    forced: false,
+                }
             })
             .collect();
 
         let client = build_client(&[])?;
 
+        let schedule_open = persisted.settings.schedule.allows_now();
         let inner = Arc::new(Inner {
             client,
             state: Mutex::new(State {
                 settings: persisted.settings,
                 entries,
                 next_id,
+                schedule_open,
             }),
             store,
             save_lock: Mutex::new(()),
             rt: Handle::current(),
             version: AtomicU64::new(1),
+            events: broadcast::channel(64).0,
         });
         Inner::spawn_ticker(&inner);
         inner.schedule();
+        // Finish checksum checks interrupted by closing the app.
+        let unverified: Vec<DownloadId> = inner
+            .state
+            .lock()
+            .entries
+            .iter()
+            .filter(|e| e.rec.checksum == Some(Checksum::Verifying))
+            .map(|e| e.rec.id)
+            .collect();
+        for id in unverified {
+            let inner = inner.clone();
+            inner
+                .rt
+                .clone()
+                .spawn(async move { inner.verify(id).await });
+        }
         Ok(Self { inner })
     }
 
@@ -182,6 +237,16 @@ impl Manager {
         if !matches!(parsed.scheme(), "http" | "https") {
             bail!("only http and https links are supported");
         }
+        let expected_sha256 = match opts
+            .expected_sha256
+            .map(|h| h.trim().to_ascii_lowercase())
+            .filter(|h| !h.is_empty())
+        {
+            Some(h) if h.len() != 64 || !h.bytes().all(|b| b.is_ascii_hexdigit()) => {
+                bail!("a SHA-256 hash is 64 hexadecimal characters")
+            }
+            h => h,
+        };
         let id = {
             let mut st = self.inner.state.lock();
             let id = st.next_id;
@@ -212,12 +277,14 @@ impl Manager {
                     .filter(|n| n != "download"),
                 headers: headers::sanitize(opts.headers),
                 speed_limit: opts.speed_limit.filter(|&l| l > 0),
-                expected_sha256: opts
-                    .expected_sha256
-                    .map(|h| h.trim().to_ascii_lowercase())
-                    .filter(|h| !h.is_empty()),
+                expected_sha256,
+                checksum: None,
             };
-            st.entries.push(Entry { rec, job: None });
+            st.entries.push(Entry {
+                rec,
+                job: None,
+                forced: false,
+            });
             id
         };
         self.inner.save();
@@ -229,6 +296,7 @@ impl Manager {
         {
             let mut st = self.inner.state.lock();
             let Some(e) = st.get_mut(id) else { return };
+            e.forced = false;
             if let Some(job) = &e.job {
                 job.stop(StopReason::Pause);
                 e.rec.status = Status::Paused;
@@ -247,10 +315,36 @@ impl Manager {
             if matches!(e.rec.status, Status::Paused | Status::Failed) {
                 e.rec.status = Status::Queued;
                 e.rec.error = None;
+                e.forced = false;
             }
         }
         self.inner.schedule();
         self.inner.save();
+    }
+
+    /// Start (or resume) a download now, even outside the scheduled hours.
+    /// It still waits for a free slot.
+    pub fn force_start(&self, id: DownloadId) {
+        {
+            let mut st = self.inner.state.lock();
+            let Some(e) = st.get_mut(id) else { return };
+            if matches!(
+                e.rec.status,
+                Status::Queued | Status::Paused | Status::Failed
+            ) {
+                e.rec.status = Status::Queued;
+                e.rec.error = None;
+                e.forced = true;
+            }
+        }
+        self.inner.schedule();
+        self.inner.save();
+    }
+
+    /// Download events (completed, failed, checksum mismatch) for
+    /// notifications. Slow receivers may miss events (`Lagged`).
+    pub fn subscribe(&self) -> broadcast::Receiver<Event> {
+        self.inner.events.subscribe()
     }
 
     pub fn pause_all(&self) {
@@ -324,6 +418,7 @@ impl Manager {
         self.inner.state.lock().settings = s;
         self.inner.bump();
         self.inner.save();
+        self.inner.apply_schedule();
         self.inner.schedule();
     }
 
@@ -355,6 +450,7 @@ impl Manager {
 
     pub fn snapshot(&self) -> Vec<Snapshot> {
         let st = self.inner.state.lock();
+        let open = st.schedule_open;
         st.entries
             .iter()
             .map(|e| {
@@ -397,6 +493,9 @@ impl Manager {
                     segments: if r.resumable { segments } else { vec![] },
                     added_at: r.added_at,
                     completed_at: r.completed_at,
+                    expected_sha256: r.expected_sha256.clone(),
+                    checksum: r.checksum,
+                    waiting_for_schedule: r.status == Status::Queued && !open && !e.forced,
                 }
             })
             .collect()
@@ -478,12 +577,13 @@ impl Inner {
             let mut st = self.state.lock();
             let max = st.settings.max_concurrent.max(1) as usize;
             let mut active = st.entries.iter().filter(|e| e.job.is_some()).count();
+            let open = st.schedule_open;
             let mut out = vec![];
             for e in st.entries.iter_mut() {
                 if active >= max {
                     break;
                 }
-                if e.rec.status == Status::Queued && e.job.is_none() {
+                if e.rec.status == Status::Queued && e.job.is_none() && (open || e.forced) {
                     let job = Job::new();
                     e.job = Some(job.clone());
                     e.rec.status = Status::Connecting;
@@ -501,6 +601,35 @@ impl Inner {
         self.bump();
     }
 
+    /// Re-check the scheduled hours. When they end, running downloads go back
+    /// to the queue (keeping their progress); when they start, the queue runs.
+    fn apply_schedule(self: &Arc<Self>) {
+        let (open, changed) = {
+            let mut st = self.state.lock();
+            let open = st.settings.schedule.allows_now();
+            let changed = open != st.schedule_open;
+            st.schedule_open = open;
+            if changed && !open {
+                for e in st.entries.iter_mut().filter(|e| !e.forced) {
+                    if let Some(job) = &e.job {
+                        // `run` keeps a `Queued` status after a pause-stop,
+                        // so the download is restarted, not shown as paused.
+                        e.rec.status = Status::Queued;
+                        job.stop(StopReason::Pause);
+                    }
+                }
+            }
+            (open, changed)
+        };
+        if changed {
+            self.bump();
+            self.save();
+            if open {
+                self.schedule();
+            }
+        }
+    }
+
     fn spawn_ticker(self: &Arc<Self>) {
         let weak = Arc::downgrade(self);
         self.rt.spawn(async move {
@@ -509,6 +638,7 @@ impl Inner {
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 let Some(inner) = weak.upgrade() else { break };
                 tick += 1;
+                inner.apply_schedule();
                 let any = {
                     let st = inner.state.lock();
                     let mut any = false;
@@ -531,6 +661,8 @@ impl Inner {
     async fn run(self: Arc<Self>, id: DownloadId, job: Arc<Job>) {
         let result = self.drive(id, &job).await;
         let reason = job.reason();
+        let mut event = None;
+        let mut verify = false;
         let removed = {
             let mut st = self.state.lock();
             match st.get_mut(id) {
@@ -552,6 +684,15 @@ impl Inner {
                             }
                             e.rec.total.get_or_insert(e.rec.downloaded);
                             e.rec.completed_at = Some(now());
+                            if e.rec.expected_sha256.is_some() {
+                                e.rec.checksum = Some(Checksum::Verifying);
+                                verify = true;
+                            } else {
+                                event = Some(Event::Completed {
+                                    id,
+                                    file_name: display_name(&e.rec),
+                                });
+                            }
                         }
                         Err(err) => {
                             if reason == StopReason::Pause || err.is::<Cancelled>() {
@@ -562,6 +703,11 @@ impl Inner {
                             } else {
                                 e.rec.status = Status::Failed;
                                 e.rec.error = Some(format!("{err:#}"));
+                                event = Some(Event::Failed {
+                                    id,
+                                    file_name: display_name(&e.rec),
+                                    error: format!("{err:#}"),
+                                });
                             }
                             if !e.rec.resumable {
                                 e.rec.segments.clear();
@@ -583,6 +729,45 @@ impl Inner {
             self.save();
             self.schedule();
         }
+        if let Some(event) = event {
+            let _ = self.events.send(event);
+        }
+        if verify {
+            self.verify(id).await;
+        }
+    }
+
+    /// Hash the finished file (on a blocking thread) and compare it with
+    /// `expected_sha256`. A mismatch keeps the download `Completed` but marks
+    /// the checksum, so the file stays available for the user to inspect.
+    async fn verify(self: &Arc<Self>, id: DownloadId) {
+        let Some(rec) = self.record(id) else { return };
+        let (Some(expected), Some(name)) = (rec.expected_sha256.clone(), rec.file_name.clone())
+        else {
+            return;
+        };
+        let path = rec.dir.join(&name);
+        let hashed = tokio::task::spawn_blocking(move || sha256_file(&path)).await;
+        let result = match hashed {
+            Ok(Ok(actual)) if actual == expected => Checksum::Ok,
+            _ => Checksum::Mismatch,
+        };
+        let event = {
+            let mut st = self.state.lock();
+            let Some(e) = st.get_mut(id) else { return };
+            if e.rec.checksum != Some(Checksum::Verifying) {
+                return;
+            }
+            e.rec.checksum = Some(result);
+            let file_name = display_name(&e.rec);
+            match result {
+                Checksum::Ok => Event::Completed { id, file_name },
+                _ => Event::ChecksumMismatch { id, file_name },
+            }
+        };
+        self.bump();
+        self.save();
+        let _ = self.events.send(event);
     }
 
     async fn drive(self: &Arc<Self>, id: DownloadId, job: &Arc<Job>) -> Result<()> {

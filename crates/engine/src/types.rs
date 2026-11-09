@@ -1,3 +1,4 @@
+use crate::schedule::Schedule;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -59,6 +60,41 @@ pub struct DownloadRecord {
     /// Expected SHA-256 (hex) to verify after completion.
     #[serde(default)]
     pub expected_sha256: Option<String>,
+    /// Result of checking `expected_sha256`. `None` when there is nothing to
+    /// check (yet).
+    #[serde(default)]
+    pub checksum: Option<Checksum>,
+}
+
+/// SHA-256 verification state of a completed download.
+///
+/// A mismatch leaves the download `Completed` (the file is kept as the server
+/// sent it); the UI shows a warning so the user can decide what to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Checksum {
+    /// The file is being hashed.
+    Verifying,
+    /// The file matches the expected hash.
+    Ok,
+    /// The file does not match (or could not be read).
+    Mismatch,
+}
+
+/// Something that happened to a download, for notifications.
+/// Only sent for downloads that finish while the app runs, never for pauses
+/// or removals.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Event {
+    /// Downloaded (and, if a hash was given, verified).
+    Completed { id: DownloadId, file_name: String },
+    /// Downloaded, but the SHA-256 differs from the expected one.
+    ChecksumMismatch { id: DownloadId, file_name: String },
+    Failed {
+        id: DownloadId,
+        file_name: String,
+        error: String,
+    },
 }
 
 /// Options for [`crate::Manager::add_with`]. Everything is optional.
@@ -98,6 +134,8 @@ pub struct Settings {
     pub notify_on_complete: bool,
     /// Accept downloads sent by the browser extension.
     pub browser_capture: bool,
+    /// Only download during these hours.
+    pub schedule: Schedule,
 }
 
 impl Default for Settings {
@@ -113,6 +151,7 @@ impl Default for Settings {
             start_with_windows: false,
             notify_on_complete: true,
             browser_capture: true,
+            schedule: Schedule::default(),
         }
     }
 }
@@ -140,4 +179,8 @@ pub struct Snapshot {
     pub segments: Vec<Range>,
     pub added_at: u64,
     pub completed_at: Option<u64>,
+    pub expected_sha256: Option<String>,
+    pub checksum: Option<Checksum>,
+    /// Queued, but outside the scheduled hours.
+    pub waiting_for_schedule: bool,
 }
