@@ -48,7 +48,6 @@ items can also get an issue.
 - [x] Settings: minimize to tray, start with Windows (hidden in the tray)
 - [x] Optional SHA-256 verification after download
 - [x] Scheduler (set hours and days, overnight windows, "Start now" override)
-
 - [x] Close button hides to the tray; downloads keep running; tray menu has
       Show / Pause all / Resume all / Quit
 - [x] Single instance: launching again shows the running window
