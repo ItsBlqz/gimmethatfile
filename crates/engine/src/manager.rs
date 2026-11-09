@@ -150,6 +150,18 @@ impl Manager {
         dir: Option<PathBuf>,
         connections: Option<u32>,
     ) -> Result<DownloadId> {
+        self.add_with(
+            url,
+            AddOptions {
+                dir,
+                connections,
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Queue a new download with extra options (headers, limits, ...).
+    pub fn add_with(&self, url: &str, opts: AddOptions) -> Result<DownloadId> {
         let parsed = Url::parse(url.trim()).context("not a valid link")?;
         if !matches!(parsed.scheme(), "http" | "https") {
             bail!("only http and https links are supported");
@@ -161,7 +173,7 @@ impl Manager {
             let rec = DownloadRecord {
                 id,
                 url: parsed.to_string(),
-                dir: dir.unwrap_or_else(|| st.settings.download_dir.clone()),
+                dir: opts.dir.unwrap_or_else(|| st.settings.download_dir.clone()),
                 file_name: None,
                 total: None,
                 resumable: false,
@@ -169,11 +181,25 @@ impl Manager {
                 error: None,
                 segments: vec![],
                 downloaded: 0,
-                connections: connections.unwrap_or(st.settings.connections).clamp(1, 32),
+                connections: opts
+                    .connections
+                    .unwrap_or(st.settings.connections)
+                    .clamp(1, 32),
                 etag: None,
                 last_modified: None,
                 added_at: now(),
                 completed_at: None,
+                name_hint: opts
+                    .name_hint
+                    .as_deref()
+                    .map(naming::sanitize)
+                    .filter(|n| n != "download"),
+                headers: opts.headers,
+                speed_limit: opts.speed_limit.filter(|&l| l > 0),
+                expected_sha256: opts
+                    .expected_sha256
+                    .map(|h| h.trim().to_ascii_lowercase())
+                    .filter(|h| !h.is_empty()),
             };
             st.entries.push(Entry { rec, job: None });
             id
@@ -586,9 +612,11 @@ impl Inner {
             let mut st = self.state.lock();
             let name = match &rec.file_name {
                 Some(n) => n.clone(),
-                None => naming::unique(&rec.dir, &info.file_name, |c| {
-                    st.name_taken(&rec.dir, c, id)
-                }),
+                None => naming::unique(
+                    &rec.dir,
+                    rec.name_hint.as_deref().unwrap_or(&info.file_name),
+                    |c| st.name_taken(&rec.dir, c, id),
+                ),
             };
             let Some(e) = st.get_mut(id) else {
                 return Err(Cancelled.into());

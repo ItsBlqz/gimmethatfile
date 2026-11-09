@@ -112,24 +112,46 @@
   <dialog id="dlg-settings" class="modal">
     <form method="dialog" id="form-settings">
       <h3>Settings</h3>
-      <label class="field">
-        <span>Default download folder</span>
-        <div class="row">
-          <input id="set-dir" type="text" spellcheck="false" />
-          <button type="button" class="btn" id="set-browse">Browse…</button>
-        </div>
-      </label>
-      <div class="grid2">
-        <label class="field">
-          <span>Simultaneous downloads</span>
-          <select id="set-max"></select>
-        </label>
-        <label class="field">
-          <span>Connections per file</span>
-          <select id="set-conns"></select>
-        </label>
+      <!-- Each section is self-contained. Inputs with data-setting="<key>" are
+           loaded and saved automatically (see "settings dialog" in app.js);
+           data-scale converts units, e.g. MB/s in the UI to bytes/s. -->
+      <div class="settings-body">
+        <!-- section:downloads -->
+        <section class="settings-section">
+          <h4>Downloads</h4>
+          <label class="field">
+            <span>Default download folder</span>
+            <div class="row">
+              <input id="set-dir" type="text" spellcheck="false" />
+              <button type="button" class="btn" id="set-browse">Browse…</button>
+            </div>
+          </label>
+          <div class="grid2">
+            <label class="field">
+              <span>Simultaneous downloads</span>
+              <select id="set-max"></select>
+            </label>
+            <label class="field">
+              <span>Connections per file</span>
+              <select id="set-conns"></select>
+            </label>
+          </div>
+          <p class="hint">More connections usually means more speed, up to what your line and the server allow. 8 is a good default; some servers limit you to fewer.</p>
+        </section>
+        <!-- /section:downloads -->
+
+        <!-- section:speed -->
+        <!-- /section:speed -->
+
+        <!-- section:behavior -->
+        <!-- /section:behavior -->
+
+        <!-- section:schedule -->
+        <!-- /section:schedule -->
+
+        <!-- section:browser -->
+        <!-- /section:browser -->
       </div>
-      <p class="hint">More connections usually means more speed, up to what your line and the server allow. 8 is a good default; some servers limit you to fewer.</p>
       <div class="modal-actions">
         <button type="button" class="btn ghost" data-close>Cancel</button>
         <button type="submit" class="btn primary">Save</button>

@@ -115,6 +115,7 @@ fn manager(dir: &std::path::Path) -> Manager {
         download_dir: dir.join("out"),
         max_concurrent: 3,
         connections: 8,
+        ..Default::default()
     });
     m
 }

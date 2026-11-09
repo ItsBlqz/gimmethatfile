@@ -45,6 +45,38 @@ pub struct DownloadRecord {
     pub last_modified: Option<String>,
     pub added_at: u64,
     pub completed_at: Option<u64>,
+    /// File name suggested by whoever added the download (e.g. the browser).
+    /// Used instead of the server's name when the file is first probed.
+    #[serde(default)]
+    pub name_hint: Option<String>,
+    /// Extra request headers (Cookie, Referer, User-Agent, ...) sent with
+    /// every request for this download, e.g. captured from the browser.
+    #[serde(default)]
+    pub headers: Vec<(String, String)>,
+    /// Per-download speed limit in bytes/second. `None` = unlimited.
+    #[serde(default)]
+    pub speed_limit: Option<u64>,
+    /// Expected SHA-256 (hex) to verify after completion.
+    #[serde(default)]
+    pub expected_sha256: Option<String>,
+}
+
+/// Options for [`crate::Manager::add_with`]. Everything is optional.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AddOptions {
+    /// Folder to save into; defaults to the settings' download folder.
+    pub dir: Option<PathBuf>,
+    /// Connections for this download; defaults to the settings.
+    pub connections: Option<u32>,
+    /// Preferred file name (sanitized; made unique on probe).
+    pub name_hint: Option<String>,
+    /// Extra request headers.
+    pub headers: Vec<(String, String)>,
+    /// Bytes/second; `None` = unlimited.
+    pub speed_limit: Option<u64>,
+    /// Expected SHA-256 (hex).
+    pub expected_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +87,17 @@ pub struct Settings {
     pub max_concurrent: u32,
     /// Connections per download.
     pub connections: u32,
+    /// Global speed limit for all downloads together, bytes/second.
+    /// `None` = unlimited.
+    pub speed_limit: Option<u64>,
+    /// Minimize button hides to the tray (the close button always does).
+    pub minimize_to_tray: bool,
+    /// Launch hidden in the tray when Windows starts.
+    pub start_with_windows: bool,
+    /// Show a notification when a download finishes or fails.
+    pub notify_on_complete: bool,
+    /// Accept downloads sent by the browser extension.
+    pub browser_capture: bool,
 }
 
 impl Default for Settings {
@@ -65,6 +108,11 @@ impl Default for Settings {
                 .unwrap_or_else(|| PathBuf::from(".")),
             max_concurrent: 3,
             connections: 8,
+            speed_limit: None,
+            minimize_to_tray: false,
+            start_with_windows: false,
+            notify_on_complete: true,
+            browser_capture: true,
         }
     }
 }

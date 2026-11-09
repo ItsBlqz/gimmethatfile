@@ -21,6 +21,7 @@ async fn main() -> anyhow::Result<()> {
         download_dir: dir,
         max_concurrent: 1,
         connections,
+        ..Default::default()
     });
     let id = m.add(&url, None, None)?;
     let start = Instant::now();

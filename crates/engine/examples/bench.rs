@@ -54,6 +54,7 @@ async fn run(work: &std::path::Path, addr: SocketAddr, conns: u32) -> anyhow::Re
         download_dir: dir.clone(),
         max_concurrent: 1,
         connections: conns,
+        ..Default::default()
     });
     let start = Instant::now();
     let id = m.add(&format!("http://{addr}/bench.bin"), None, None)?;

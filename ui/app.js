@@ -312,7 +312,37 @@ $("#form-add").addEventListener("submit", async (e) => {
 // ---------- settings dialog ----------
 const dlgSettings = $("#dlg-settings");
 
+// Generic binding: any input in the settings form with data-setting="key" is
+// filled from and saved to settings[key]. Checkboxes map to booleans; number
+// inputs map to numbers (empty = null), multiplied by data-scale if present.
+// Settings that need custom UI can register a hook instead:
+//   settingsHooks.push({ load(settings) {...}, save(next) {...} });
+const settingsHooks = [];
+
+function loadSettingFields(form, s) {
+  form.querySelectorAll("[data-setting]").forEach((el) => {
+    const v = s[el.dataset.setting];
+    const scale = Number(el.dataset.scale || 1);
+    if (el.type === "checkbox") el.checked = !!v;
+    else if (el.type === "number") el.value = v == null ? "" : +(v / scale).toFixed(2);
+    else el.value = v ?? "";
+  });
+}
+
+function readSettingFields(form, into) {
+  form.querySelectorAll("[data-setting]").forEach((el) => {
+    const key = el.dataset.setting;
+    const scale = Number(el.dataset.scale || 1);
+    if (el.type === "checkbox") into[key] = el.checked;
+    else if (el.type === "number") into[key] = el.value === "" ? null : Math.round(Number(el.value) * scale);
+    else into[key] = el.value;
+  });
+  return into;
+}
+
 $("#btn-settings").addEventListener("click", () => {
+  loadSettingFields($("#form-settings"), settings);
+  settingsHooks.forEach((h) => h.load?.(settings));
   $("#set-dir").value = settings.download_dir;
   fillSelect($("#set-max"), [1, 2, 3, 4, 5, 6, 8, 10], settings.max_concurrent, (v) => (v === 1 ? "1 at a time" : `${v} at a time`));
   fillSelect($("#set-conns"), CONN_OPTIONS, settings.connections);
@@ -326,11 +356,15 @@ $("#set-browse").addEventListener("click", async () => {
 
 $("#form-settings").addEventListener("submit", async (e) => {
   e.preventDefault();
+  // Start from the current settings so fields without UI are preserved.
   const next = {
+    ...settings,
     download_dir: $("#set-dir").value.trim() || settings.download_dir,
     max_concurrent: Number($("#set-max").value),
     connections: Number($("#set-conns").value),
   };
+  readSettingFields($("#form-settings"), next);
+  settingsHooks.forEach((h) => h.save?.(next));
   await call("set_settings", { settings: next });
   settings = (await call("get_settings")) || next;
   dlgSettings.close();

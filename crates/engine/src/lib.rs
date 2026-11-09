@@ -8,4 +8,4 @@ mod probe;
 mod types;
 
 pub use manager::Manager;
-pub use types::{DownloadId, Range, Settings, Snapshot, Status};
+pub use types::{AddOptions, DownloadId, Range, Settings, Snapshot, Status};

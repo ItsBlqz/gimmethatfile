@@ -1,56 +1,49 @@
 # TODO
 
-Working list of what to build next. Bigger items get an issue once the repo is
-public; this file is the quick overview.
+Working list of what to build next. This file is the quick overview; bigger
+items can also get an issue.
 
-## Before going public
+## In progress
 
 - [ ] **Throughput-aware connection count.** Only add connections while total
       speed actually improves, and drop back when it falls. Today, extra
       connections can be slower than one when a single connection already fills
       the line (Debian mirror: 26 MB/s with 1 connection vs 9–20 MB/s with 8;
       see `docs/BENCHMARKS.md`).
-- [ ] **Code of Conduct contact.** Replace `[contact email to be added]` in
-      `CODE_OF_CONDUCT.md`.
-- [ ] **Triage Dependabot PRs** after the rename: merge the GitHub Actions bumps;
-      test `reqwest` 0.13 on real HTTPS downloads (its TLS backend changed);
-      check why `parking_lot` 0.13 fails CI.
-- [ ] **Browser download capture** (see below).
-- [ ] Make the repo public, then run `scripts/protect-main.sh` to turn on branch
-      protection, and enable private vulnerability reporting
-      (Settings → Code security).
-- [ ] Tag `v0.1.0` and publish the draft release.
-
-## Features
+- [ ] **Speed limits**: a global limit, plus an optional limit per download.
+- [ ] **Browser download capture** (see below), including per-download request
+      headers and cookies in the engine.
+- [ ] **Notification** when a download finishes or fails.
+- [ ] **Setting: minimize to tray** (today only the close button does that).
+- [ ] **Start with Windows** (optional; starts hidden in the tray).
+- [ ] **SHA-256 verification**: optionally paste the expected hash when adding a
+      download and check it after completion.
+- [ ] **Scheduler**: only download between set times.
 
 ### Browser download capture
 Catch downloads in Chrome/Edge/Firefox and hand them to the app instead of the
 browser's own downloader.
 
-- A WebExtension (Manifest V3) that listens to `chrome.downloads.onCreated`,
-  cancels the browser's download and sends the URL, plus any cookies, referrer
-  and user agent the server needs, to the app.
-- Transport options: **native messaging** (most robust; the installer registers
-  a host manifest) or a **localhost HTTP endpoint** with a per-install token
-  (simpler, works for every browser).
-- Include cookies/headers so downloads that need a logged-in session work. The
-  engine needs per-download request headers for this.
-- Settings: file types and minimum size to capture, sites to skip, and a
-  "hold Alt to let the browser download" escape hatch.
-- Use the single-instance hook (already in place) to receive URLs when the app
-  is launched with arguments.
+- A WebExtension (Manifest V3) that sees new browser downloads, cancels them,
+  and sends the URL, file name, referrer and any cookies the server needs to
+  the app.
+- The app accepts these over a localhost endpoint that only answers browser
+  extensions, not web pages.
+- If the app isn't running or capture is off, the browser downloads the file
+  as usual.
+- Settings: file types and minimum size to capture, sites to skip, and a way to
+  let one download through to the browser.
 
-### Other
-- [ ] Global and per-download speed limits
-- [ ] Notification when a download finishes (`tauri-plugin-notification`)
-- [ ] Setting: minimize button also goes to the tray (today only × does)
-- [ ] Start with Windows (optional, starts in the tray)
-- [ ] Auto-update (`tauri-plugin-updater` + signed update manifest)
-- [ ] Code signing for the Windows installer (e.g. SignPath, free for open source)
-- [ ] Optional SHA-256 verification after download
-- [ ] Scheduler (start/stop at set times)
-- [ ] Per-download request headers and cookies (also needed for browser capture)
-- [ ] macOS and Linux release builds
+## Backlog
+
+- [ ] Auto-update (`tauri-plugin-updater` + signed update manifest). The update
+      feed is served from GitHub Releases, which needs the repo to be public.
+- [ ] Code signing for the Windows installer (e.g. SignPath, free for open
+      source projects, which means the repo has to be public).
+- [ ] Code of Conduct contact email in `CODE_OF_CONDUCT.md`.
+- [ ] macOS and Linux release builds.
+- [ ] Publish: make the repo public, run `scripts/protect-main.sh`, enable
+      private vulnerability reporting, tag `v0.1.0`.
 
 ## Done
 
@@ -58,3 +51,5 @@ browser's own downloader.
       Show / Pause all / Resume all / Quit
 - [x] Single instance: launching again shows the running window
 - [x] Rename to Gimme That File; flat UI with custom title bar and themes
+- [x] Dependency updates: reqwest 0.13 (native TLS + system proxy),
+      parking_lot 0.13, dirs 7, windows-sys 0.61; MSRV 1.95
