@@ -39,6 +39,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`-- <per_conn> <file_MB> <line_MBps> <penalty>`), and `BENCH_CONNS=1,8`
   runs only some connection counts.
 
+- Performance checks in CI: every pull request is compared with `main` on
+  six simulated server types (fails if slower by more than 3 standard errors
+  and 5%), plus an informational run over an emulated long-distance network
+  and a manual/monthly real-world benchmark (`scripts/perf_ab.sh`,
+  `scripts/realworld.sh`, `examples/perf.rs`).
+
 ### Changed
 
 - Connection count: while a speed limit is the bottleneck, the engine uses as

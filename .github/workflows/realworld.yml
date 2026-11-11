@@ -1,0 +1,36 @@
+name: Real-world benchmark
+
+# Downloads public files over the internet with 1 and 8 connections and
+# reports the speeds. Never gates anything: GitHub's network is not a home
+# connection and results swing with the moment. Run it by hand (Actions ->
+# Real-world benchmark -> Run workflow) or let it run monthly to watch trends.
+on:
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: "Rounds (each ~2 GB of downloads)"
+        default: "2"
+      sources:
+        description: "Comma list: kernel,debian,hetzner"
+        default: "kernel,debian,hetzner"
+  schedule:
+    - cron: "17 3 1 * *" # 03:17 UTC on the 1st of every month
+
+jobs:
+  realworld:
+    name: Real-world benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Download and measure
+        run: scripts/realworld.sh "${{ inputs.rounds || '2' }}" "${{ inputs.sources || 'kernel,debian,hetzner' }}"
+      - name: Summary
+        if: always()
+        run: cat target/realworld/summary.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: realworld-results
+          path: target/realworld/results.tsv

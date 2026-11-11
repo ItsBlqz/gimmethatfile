@@ -30,7 +30,8 @@
           { "context": "Test (ubuntu-latest)" },
           { "context": "Test (windows-latest)" },
           { "context": "MSRV" },
-          { "context": "Build app (Windows)" }
+          { "context": "Build app (Windows)" },
+          { "context": "Performance" }
         ]
       }
     }

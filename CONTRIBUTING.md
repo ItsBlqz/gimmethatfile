@@ -74,6 +74,45 @@ Also:
   especially the invariants, and update it if they change.
 - Keep PRs focused: one change per PR is much easier to review.
 
+## Performance
+
+A download manager that gets slower is a bug, so CI checks speed on every
+pull request (the **Performance** workflow). It works in three layers:
+
+1. **Performance** (required). `crates/engine/examples/perf.rs` downloads
+   from an in-process test server that imitates different kinds of real
+   servers: a speed cap per connection, speed that swings like a CDN's,
+   slow connection setup, a server that answers `429` beyond 3 connections,
+   a line that's already full, and no range support. CI builds `main` and your
+   branch on the same machine, runs both alternately 4 times, and fails if
+   your branch is slower on any scenario by more than **3 standard errors
+   and at least 5%**. (The "noisy" scenario reproduces a real regression we
+   once shipped: a change that halved speed on kernel.org.)
+2. **Performance (emulated network)** (informational). The same comparison,
+   but over real TCP with an emulated long-distance connection (80 ms round
+   trip, 0.1% packet loss, 200 Mbit/s) using Linux `tc netem`. It reports in
+   the job summary and doesn't fail the PR yet.
+3. **Real-world benchmark** (manual, and monthly). Downloads public files over
+   the internet. Too noisy to pass or fail anything; it shows trends and
+   feeds [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+
+The numbers from 1 and 2 answer "did this change make the engine slower?",
+not "how fast is it for users?". Speed claims come from real-world runs.
+
+Run the same check locally before pushing an engine change (Linux, macOS or
+Git Bash on Windows; needs Python 3):
+
+```sh
+scripts/perf_ab.sh origin/main     # compare your working tree with main
+cargo run --release -p gtf-engine --example perf -- --list   # the scenarios
+scripts/realworld.sh 1 kernel      # optional: one real-world round (~300 MB)
+```
+
+If you add a scenario, add it to `examples/perf.rs` (the comparison builds the
+base commit with *your* copy of the benchmark, so both sides run the same
+scenarios). If a change is meant to trade speed in one scenario for another,
+say so in the PR; a maintainer can merge it anyway.
+
 ## Pull request flow
 
 `main` is protected: nobody pushes to it directly, maintainers included.
@@ -81,8 +120,8 @@ Also:
 1. Fork the repo (maintainers can use a branch), and create a branch such as
    `fix/resume-etag`.
 2. Open a pull request against `main`.
-3. CI must pass (Lint, Test on Windows and Linux, MSRV, app build), and a
-   maintainer has to approve the PR.
+3. CI must pass (Lint, Test on Windows and Linux, MSRV, app build,
+   Performance), and a maintainer has to approve the PR.
 4. A maintainer merges it, usually with "Squash and merge".
 
 The rules live in [`.github/rulesets/main.json`](.github/rulesets/main.json)

@@ -1,0 +1,96 @@
+name: Performance
+
+# Speed regression checks (see CONTRIBUTING.md, "Performance").
+# Both jobs build the base commit and this one on the same machine and run the
+# scenarios of crates/engine/examples/perf.rs alternately, then compare.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Commit to compare against"
+        default: "HEAD~1"
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  local:
+    # Referenced by .github/rulesets/main.json; rename it there too.
+    name: Performance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: perf
+      - name: Pick the commit to compare against
+        id: base
+        shell: bash
+        run: |
+          case "${{ github.event_name }}" in
+            pull_request) base="${{ github.event.pull_request.base.sha }}" ;;
+            push) base="${{ github.event.before }}" ;;
+            *) base="${{ inputs.base }}" ;;
+          esac
+          if [[ -z "$base" || "$base" =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            base=HEAD~1
+          fi
+          echo "sha=$(git rev-parse "$base")" >> "$GITHUB_OUTPUT"
+      - name: Compare with ${{ steps.base.outputs.sha }}
+        run: scripts/perf_ab.sh "${{ steps.base.outputs.sha }}" 4
+      - name: Summary
+        if: always()
+        run: cat target/perf/summary.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+
+  netem:
+    # Informational for now: the same comparison over real TCP with emulated
+    # latency, jitter, packet loss and bandwidth (Linux tc netem on loopback).
+    name: Performance (emulated network)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: perf
+      - name: Pick the commit to compare against
+        id: base
+        shell: bash
+        run: |
+          case "${{ github.event_name }}" in
+            pull_request) base="${{ github.event.pull_request.base.sha }}" ;;
+            push) base="${{ github.event.before }}" ;;
+            *) base="${{ inputs.base }}" ;;
+          esac
+          if [[ -z "$base" || "$base" =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            base=HEAD~1
+          fi
+          echo "sha=$(git rev-parse "$base")" >> "$GITHUB_OUTPUT"
+      - name: Emulate a long-distance home connection on loopback
+        run: |
+          # 40 ms each way (80 ms round trip) +-5 ms, 0.1% loss, 200 Mbit/s.
+          # A normal MTU so loss hits ordinary-sized packets.
+          sudo ip link set dev lo mtu 1500
+          sudo tc qdisc add dev lo root netem delay 40ms 5ms distribution normal loss 0.1% rate 200mbit limit 20000
+          tc qdisc show dev lo
+          ping -c 3 127.0.0.1
+      - name: Compare with ${{ steps.base.outputs.sha }}
+        run: >
+          scripts/perf_ab.sh "${{ steps.base.outputs.sha }}" 3 --
+          --warn-only --min-drop 0.10
+          --title "Performance over an emulated network (80 ms RTT, 0.1% loss, 200 Mbit/s)"
+      - name: Summary
+        if: always()
+        run: cat target/perf/summary.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true

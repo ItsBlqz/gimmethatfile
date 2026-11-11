@@ -8,6 +8,14 @@ it is.
 There are two kinds of numbers below: a reproducible local benchmark that anyone
 can run, and real-world measurements, which you should treat as examples.
 
+## In CI
+
+Every pull request is checked for speed regressions against `main` by the
+**Performance** workflow (`examples/perf.rs`, `scripts/perf_ab.sh`), including
+over an emulated long-distance network, and the real-world downloads below
+can be re-run from the **Real-world benchmark** workflow. See
+[CONTRIBUTING.md](../CONTRIBUTING.md#performance) for how they work.
+
 ## 1. Reproducible: per-connection speed cap
 
 `examples/bench.rs` starts a local HTTP server that caps every connection at a
