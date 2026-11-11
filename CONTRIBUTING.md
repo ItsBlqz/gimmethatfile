@@ -36,6 +36,9 @@ cargo test -p gtf-engine              # run the engine tests
 The UI is plain HTML/CSS/JS in `ui/`, with no Node or bundler. Edit and restart
 the app.
 
+Working with an AI coding agent? [AGENTS.md](AGENTS.md) has the short version
+of this guide for it (`CLAUDE.md` points there too).
+
 ### Useful environment variables
 
 | Variable | Effect |
