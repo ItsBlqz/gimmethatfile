@@ -172,8 +172,11 @@ docs/               Architecture and benchmarks
 
 ## Roadmap
 
-Next up: auto-update, code signing and macOS/Linux builds. The full list is in [TODO.md](TODO.md).
-Ideas and votes are welcome in [issues](https://github.com/ItsBlqz/gimmethatfile/issues).
+Next up: auto-update, code signing and macOS/Linux builds. Everything planned
+is in the [issues](https://github.com/ItsBlqz/gimmethatfile/issues); ideas and
+votes (👍 on an issue) are welcome there. Issues labeled
+[good first issue](https://github.com/ItsBlqz/gimmethatfile/labels/good%20first%20issue)
+are a good place to start contributing.
 
 ## Contributing
 
