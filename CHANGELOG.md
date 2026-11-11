@@ -6,7 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-First public release (will be tagged `v0.1.0`).
+## [0.1.0] - 2026-11-11
+
+First public release.
 
 ### Downloads
 
@@ -81,4 +83,5 @@ First public release (will be tagged `v0.1.0`).
 - `GIMMETHATFILE_DATA_DIR` to use a separate download list, and `GTF_DEBUG=1`
   for engine logs.
 
-[Unreleased]: https://github.com/ItsBlqz/gimmethatfile/commits/main
+[Unreleased]: https://github.com/ItsBlqz/gimmethatfile/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ItsBlqz/gimmethatfile/releases/tag/v0.1.0

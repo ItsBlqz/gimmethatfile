@@ -61,12 +61,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           v=${{ steps.version.outputs.version }}
-          # Release notes = this version's section of CHANGELOG.md
-          awk -v v="$v" '
-            $0 ~ "^## \\[" v "\\]" { on=1; next }
-            on && /^## \[/ { exit }
+          # Release notes = this version's section of CHANGELOG.md, up to the
+          # next version or the link definitions at the end. Matched literally:
+          # as a regex, "[0.1.0]" would be a character class.
+          awk -v h="## [$v]" '
+            index($0, h) == 1 { on=1; next }
+            on && (/^## \[/ || /^\[[^]]+\]: /) { exit }
             on { print }
           ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::No '## [$v]' section in CHANGELOG.md"
+            exit 1
+          fi
           cat >> notes.md <<'EOF'
 
           ---
