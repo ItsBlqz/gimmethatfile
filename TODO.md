@@ -25,6 +25,15 @@ items can also get an issue.
       benchmark, but on the Debian mirror itself only +3% over 4 interleaved
       pairs (19.7 → 20.3 MB/s), which is within the noise. The redirect
       wasn't the main cause.
+- [ ] **Flaky speed-limit tests.** `per_download_limit_is_accurate` (and its
+      siblings `global_speed_limit_is_accurate` and
+      `per_download_limit_works_without_ranges` in `tests/e2e.rs`) time the
+      whole download, including probe, connection setup and the final
+      flush/rename, and require 0.88–1.08× the limit. On a busy machine that
+      overhead pushes the result just under 0.88 (seen: 0.87 with the full
+      suite running in parallel). Loosen the lower bound in `assert_rate` to
+      about 0.80 (keep the upper bound strict), or time only first byte to
+      last byte.
 - [ ] **Dev instance next to the installed app**: let a debug build with
       `GIMMETHATFILE_DATA_DIR` set skip the single-instance check (and use
       another receiver port), so tests don't collide with a running copy.
