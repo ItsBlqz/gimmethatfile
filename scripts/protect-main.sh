@@ -5,13 +5,17 @@
 #
 #     scripts/protect-main.sh
 #
-# Requires the GitHub CLI (`gh`), logged in as a repo admin.
+# Requires the GitHub CLI (`gh`), logged in as a repo admin. On Windows, run
+# it from Git Bash, or from PowerShell with:
+#
+#     & "$env:ProgramFiles\Git\bin\bash.exe" scripts/protect-main.sh
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 file=.github/rulesets/main.json
-name=$(jq -r .name "$file")
+# The ruleset's own name (the first "name" key, indented two spaces).
+name=$(sed -n 's/^  "name": *"\([^"]*\)".*/\1/p' "$file")
 
 id=$(gh api "repos/$repo/rulesets" -q ".[] | select(.name == \"$name\") | .id" 2>/dev/null || true)
 if [[ -n "$id" ]]; then
