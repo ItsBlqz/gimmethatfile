@@ -82,8 +82,6 @@ more than 3 standard errors and 5%. It only measures when `crates/engine/`,
 
 - `cargo clippy` and `cargo check` don't produce an executable. To try an app
   change, run or build it.
-- The speed-limit tests in `tests/e2e.rs` are timing-sensitive and can fail on
-  a heavily loaded machine (#10). Rerun before investigating.
 - On Windows, `python3` may be the Microsoft Store stub; the scripts pick a
   Python that actually runs.
 - `GTF_DEBUG=1` logs retries, throttling and connection-count changes to stderr.

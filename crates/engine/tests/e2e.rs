@@ -588,10 +588,14 @@ async fn timed_download(m: &Manager, addr: SocketAddr, opts: AddOptions) -> (f64
     (start.elapsed().as_secs_f64(), snap)
 }
 
+/// The time includes probe, connection setup and the final rename, which on a
+/// busy machine (CI runners, tests in parallel) costs a few hundred ms, so the
+/// lower bound is loose. The upper bound stays tight: exceeding the limit is
+/// the bug these tests exist to catch.
 fn assert_rate(len: usize, secs: f64, limit: f64) {
     let rate = len as f64 / secs;
     assert!(
-        (0.88 * limit..=1.08 * limit).contains(&rate),
+        (0.80 * limit..=1.08 * limit).contains(&rate),
         "expected about {:.2} MB/s, got {:.2} MB/s",
         limit / 1e6,
         rate / 1e6
