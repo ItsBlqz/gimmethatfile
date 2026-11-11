@@ -39,7 +39,6 @@ items can also get an issue.
       feed is served from GitHub Releases, which needs the repo to be public.
 - [ ] Code signing for the Windows installer (e.g. SignPath, free for open
       source projects, which means the repo has to be public).
-- [ ] Code of Conduct contact email in `CODE_OF_CONDUCT.md`.
 - [ ] macOS and Linux release builds.
 - [ ] Publish: make the repo public, run `scripts/protect-main.sh`, enable
       private vulnerability reporting, tag `v0.1.0`.
@@ -50,6 +49,8 @@ items can also get an issue.
 - [x] Connection controller: slow start, backing off on 429/503, and few
       connections while a speed limit binds (throughput-based reductions are
       experimental, see Next)
+- [x] Code of Conduct reporting via GitHub's Report content / private reports
+      (no email)
 - [x] Final benchmark on an idle machine plus an "under load" real-life run
       (docs/BENCHMARKS.md)
 - [x] Browser download capture: Chrome/Edge extension, local receiver on
