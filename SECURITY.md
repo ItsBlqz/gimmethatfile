@@ -60,8 +60,9 @@ the file's site (and then the browser's User-Agent) to the app. They are:
 - sent only with requests for that download; when a redirect leaves the site,
   `Cookie` and `Authorization` are dropped;
 - stored in plain text in the local download list (`downloads.json` in the
-  app's data folder) so a paused or interrupted download can resume. Removing a
-  download from the list removes them;
+  app's data folder) only while the download is unfinished, so a paused or
+  interrupted download can resume. They are deleted as soon as the download
+  completes, or when it is removed from the list;
 - never written to the `GTF_DEBUG` log (only header names are).
 
 Headers that would change how the app talks to the server (`Host`, `Range`,

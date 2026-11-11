@@ -712,6 +712,9 @@ impl Inner {
                             e.rec.status = Status::Completed;
                             e.rec.error = None;
                             e.rec.segments.clear();
+                            // Captured cookies/headers were only kept so the
+                            // download could resume; don't keep them on disk.
+                            e.rec.headers.clear();
                             if let Some(t) = e.rec.total {
                                 e.rec.downloaded = t;
                             }

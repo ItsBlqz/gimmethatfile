@@ -303,4 +303,10 @@ async fn headers_survive_restart() {
     let snap = wait_done(&m, id).await;
     let got = std::fs::read(tmp.path().join("out").join(snap.file_name.unwrap())).unwrap();
     assert_eq!(got, *body);
+
+    // Once complete, the cookies are no longer needed and are removed from
+    // the saved download list.
+    m.shutdown();
+    let saved = std::fs::read_to_string(tmp.path().join("state.json")).unwrap();
+    assert!(!saved.contains("k=v"), "cookies cleared after completion");
 }

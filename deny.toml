@@ -1,0 +1,48 @@
+# cargo-deny: dependency licences, known vulnerabilities and sources.
+#
+#     cargo install cargo-deny --locked
+#     cargo deny check
+#
+# CI runs this in the "Dependencies" job.
+
+[advisories]
+# Known vulnerabilities and unmaintained crates from the RustSec database.
+# Add an entry here only with a comment explaining why it doesn't affect us.
+ignore = []
+# Vulnerabilities fail for every dependency. "Unmaintained" notices only for
+# crates we depend on directly: the current ones (zbus/zvariant, glib's
+# proc-macro-error) come from Tauri's Linux-only dependencies, which we can't
+# replace ourselves.
+unmaintained = "workspace"
+
+[licenses]
+# Permissive licences, plus MPL-2.0: file-level copyleft that only requires the
+# (unmodified, crates.io-hosted) source of those crates to stay available. It
+# comes in through Tauri (cssparser, selectors) and dirs (option-ext).
+# Crates offered under several licences (e.g. r-efi: MIT OR Apache-2.0 OR
+# LGPL-2.1-or-later) are used under an allowed one.
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "ISC",
+    "0BSD",
+    "Zlib",
+    "Unicode-3.0",
+    "Unlicense",
+    "CC0-1.0",
+    "MPL-2.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+# Our own crates depend on each other by path; that's fine for unpublished crates.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

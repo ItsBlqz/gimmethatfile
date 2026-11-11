@@ -22,8 +22,6 @@ items can also get an issue.
       connections opened near the end (smaller tail splits), each going
       through Debian's redirect. Could also resolve the redirect once and
       reuse the final URL for segment requests.
-- [ ] **Clear stored cookies** from a download once it completes (they are kept
-      in the local download list so resume works).
 - [ ] **Dev instance next to the installed app**: let a debug build with
       `GIMMETHATFILE_DATA_DIR` set skip the single-instance check (and use
       another receiver port), so tests don't collide with a running copy.
@@ -41,7 +39,10 @@ items can also get an issue.
       source projects, which means the repo has to be public).
 - [ ] macOS and Linux release builds.
 - [ ] Publish: make the repo public, run `scripts/protect-main.sh`, enable
-      private vulnerability reporting, tag `v0.1.0`.
+      private vulnerability reporting (also used for private Code of Conduct
+      reports), upload `docs/social-preview.png` (Settings → Social preview),
+      rename `[Unreleased]` in CHANGELOG.md to `[0.1.0] - <date>`, tag
+      `v0.1.0`, and publish the draft release.
 
 ## Done
 
@@ -49,6 +50,10 @@ items can also get an issue.
 - [x] Connection controller: slow start, backing off on 429/503, and few
       connections while a speed limit binds (throughput-based reductions are
       experimental, see Next)
+- [x] Captured cookies are deleted when a download completes
+- [x] Pre-release cleanup: changelog folded into the first release, new
+      screenshots, cargo-deny (licences/advisories) in CI, history checked for
+      secrets, social preview image (docs/social-preview.png)
 - [x] Code of Conduct reporting via GitHub's Report content / private reports
       (no email)
 - [x] Final benchmark on an idle machine plus an "under load" real-life run

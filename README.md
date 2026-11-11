@@ -13,7 +13,7 @@ Paste a link, pick a folder, done.
 
 <picture>
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshot-light.png" />
-  <img src="docs/screenshot.png" width="820" alt="Gimme That File showing two downloads in progress with 8 connections each, a paused download and two completed ones" />
+  <img src="docs/screenshot.png" width="820" alt="Gimme That File showing two downloads in progress (one held to a 3 MB/s speed limit), a paused download, and two completed ones, one with a verified checksum" />
 </picture>
 
 </div>
@@ -80,8 +80,9 @@ Edge and hands them to the app. Until it is in the stores, install it with
   off **Settings → Browser → Accept downloads sent by the browser extension**,
   the browser downloads the file as usual. Nothing gets lost.
 - Downloads that need a login work: the extension passes along the site's
-  cookies, the referring page and the file name. The app stores them in its
-  local download list (`downloads.json`) so the download can be resumed later.
+  cookies, the referring page and the file name. The app keeps them in its
+  local download list (`downloads.json`) only until the download completes,
+  so it can be resumed in the meantime.
 - Options for minimum size, file types and sites to skip; a toolbar switch; and
   **Download with Gimme That File** in the right-click menu on links.
 - The app listens on `127.0.0.1:47811` and only answers browser extensions, not

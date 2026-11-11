@@ -67,6 +67,9 @@ Also:
   same way, and show that the test fails without your fix.
 - If you change the browser extension or `app/src/browser.rs`, also run the
   extension tests (`npm test` in `extension/test`, see its README).
+- **Adding a dependency?** `cargo deny check` must pass (licences, known
+  vulnerabilities, sources; see `deny.toml`). CI runs it in the
+  **Dependencies** job.
 - **Keep the engine free of UI code.** Anything the UI needs goes through
   `Manager` and `Snapshot`.
 - **Update `CHANGELOG.md`** under `Unreleased` if users will notice the change.
