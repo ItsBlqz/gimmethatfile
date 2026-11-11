@@ -1,6 +1,7 @@
 use crate::naming;
-use anyhow::{bail, Result};
+use anyhow::Result;
 use reqwest::{header, Client, StatusCode};
+use std::fmt;
 use url::Url;
 
 #[derive(Debug, Clone)]
@@ -10,6 +11,26 @@ pub struct ProbeInfo {
     pub file_name: String,
     pub etag: Option<String>,
     pub last_modified: Option<String>,
+    /// Where the request ended up after redirects.
+    pub final_url: Url,
+}
+
+/// The server answered the probe with an error status.
+#[derive(Debug)]
+pub struct HttpError(pub StatusCode);
+
+impl fmt::Display for HttpError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "server responded with {}", self.0)
+    }
+}
+impl std::error::Error for HttpError {}
+
+impl HttpError {
+    /// Overload and gateway errors usually go away; a 404 doesn't.
+    pub fn is_transient(&self) -> bool {
+        matches!(self.0.as_u16(), 408 | 429 | 500 | 502 | 503 | 504)
+    }
 }
 
 /// Ask for the first byte only. A `206 Partial Content` reply tells us the
@@ -49,13 +70,16 @@ pub async fn probe(client: &Client, url: &str) -> Result<ProbeInfo> {
         // Usually an empty file.
         (Some(0), false)
     } else {
-        bail!("server responded with {status}");
+        return Err(HttpError(status).into());
     };
 
     let final_url: Url = resp.url().clone();
-    let name = get(header::CONTENT_DISPOSITION)
-        .as_deref()
-        .and_then(naming::from_content_disposition)
+    // Not `to_str`: many servers put raw UTF-8 in this header, which is not
+    // valid header text strictly speaking, but is what browsers accept.
+    let name = headers
+        .get(header::CONTENT_DISPOSITION)
+        .map(|v| String::from_utf8_lossy(v.as_bytes()))
+        .and_then(|v| naming::from_content_disposition(&v))
         .or_else(|| naming::from_url(&final_url))
         .or_else(|| Url::parse(url).ok().as_ref().and_then(naming::from_url))
         .unwrap_or_else(|| "download".into());
@@ -66,6 +90,7 @@ pub async fn probe(client: &Client, url: &str) -> Result<ProbeInfo> {
         file_name: naming::sanitize(&name),
         etag: get(header::ETAG),
         last_modified: get(header::LAST_MODIFIED),
+        final_url,
     })
 }
 
@@ -89,5 +114,13 @@ mod tests {
         assert_eq!(parse_range_total("bytes 0-0/12345"), Some(12345));
         assert_eq!(parse_range_total("bytes 0-0/*"), None);
         assert_eq!(parse_range_start("bytes 100-199/12345"), Some(100));
+    }
+
+    #[test]
+    fn only_overload_errors_are_transient() {
+        assert!(HttpError(StatusCode::SERVICE_UNAVAILABLE).is_transient());
+        assert!(HttpError(StatusCode::TOO_MANY_REQUESTS).is_transient());
+        assert!(!HttpError(StatusCode::NOT_FOUND).is_transient());
+        assert!(!HttpError(StatusCode::FORBIDDEN).is_transient());
     }
 }

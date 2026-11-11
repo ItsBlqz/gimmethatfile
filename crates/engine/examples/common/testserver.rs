@@ -18,6 +18,8 @@
 //! - `max_conns`: more simultaneous requests than this get `429 Too Many
 //!   Requests` (Hetzner, OVH).
 //! - `ranges`: whether `Range` requests are honored.
+//! - `redirect`: the link redirects to the real file after a delay (GitHub
+//!   releases, mirror pickers).
 
 #![allow(dead_code)]
 
@@ -46,6 +48,9 @@ pub struct ServerConfig {
     pub max_conns: Option<usize>,
     /// Honor `Range` requests.
     pub ranges: bool,
+    /// Act like a download link that redirects to the real file: every
+    /// request outside `/direct/` waits this long and is then sent there.
+    pub redirect: Option<Duration>,
 }
 
 impl Default for ServerConfig {
@@ -59,6 +64,7 @@ impl Default for ServerConfig {
             setup: Duration::ZERO,
             max_conns: None,
             ranges: true,
+            redirect: None,
         }
     }
 }
@@ -176,6 +182,19 @@ async fn handle(mut s: TcpStream, sh: &Shared) -> std::io::Result<()> {
             return Ok(());
         }
         req.extend_from_slice(&tmp[..n]);
+    }
+
+    if let Some(delay) = sh.cfg.redirect {
+        let head = String::from_utf8_lossy(&req);
+        let path = head.split(' ').nth(1).unwrap_or("/");
+        if !path.starts_with("/direct/") {
+            tokio::time::sleep(delay).await;
+            let reply = format!(
+                "HTTP/1.1 302 Found\r\nLocation: /direct{path}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            s.write_all(reply.as_bytes()).await?;
+            return s.shutdown().await;
+        }
     }
 
     let open = sh.open.fetch_add(1, Ordering::Relaxed) + 1;

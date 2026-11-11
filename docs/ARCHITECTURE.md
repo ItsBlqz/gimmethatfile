@@ -43,10 +43,12 @@ Queued ──schedule()──▶ Connecting ──probe ok──▶ Downloading 
    calls `schedule()`.
 2. `schedule()` starts queued downloads while fewer than `max_concurrent` are
    running. Each running download has a `Job`.
-3. `Inner::drive` probes the server and decides between a **fresh** start and a
-   **resume**. It resumes only if the size and ETag are unchanged and the
-   `.gtfpart` file exists. It then opens or creates the part file and runs either
-   `download_ranged` (range support) or `download_single`.
+3. `Inner::drive` probes the server (retrying network errors and
+   `429`/`5xx` twice) and decides between a **fresh** start and a **resume**.
+   It resumes only if the size and ETag (or, without ETags, `Last-Modified`)
+   are unchanged and the `.gtfpart` file exists at its full size. It then
+   opens or creates the part file and runs either `download_ranged` (range
+   support) or `download_single`.
 4. On success, the part file is renamed to the final name. `Inner::run` records
    the outcome, saves, and calls `schedule()` again.
 
@@ -93,6 +95,17 @@ flag. Workers are tokio tasks, each holding one HTTP connection.
   512 KiB or 500 ms of data, or until it reaches the segment's `end`, then
   **commits**: under the segment lock it writes `min(buffered, end - pos)`
   bytes at offset `pos` and advances `pos`.
+  Every `206` must report the file size the probe saw; a different size
+  means the file was replaced, and the download fails instead of mixing two
+  versions. A lone connection that gets `429`/`503` waits for the server's
+  `Retry-After` (at most 30 s).
+- **redirects**: if the probe was redirected, segment requests go straight
+  to the final address (`job::Source::resolved`), which saves a round trip
+  per connection and keeps all connections on one mirror. A download with
+  its own headers (cookies) only does this when the redirect stays on the
+  same origin, so they are never sent to another host. When the final
+  address answers `4xx` or can't be reached (expired signed link, mirror
+  gone), the download goes back to the original link for the rest of the run.
 - **extend**: when a segment finishes and the segment right after it is idle,
   the worker appends that segment to its own and keeps reading the same
   connection, with no new request.
@@ -193,8 +206,8 @@ few connections while a limit binds. The single-connection path
 ## Persistence
 
 `downloads.json` in the app data directory (override with
-`GIMMETHATFILE_DATA_DIR`). It is written atomically (temporary file, then
-rename) on every state change and every 3 s while downloading. Downloads that
+`GIMMETHATFILE_DATA_DIR`). It is written atomically (temporary file, flushed
+to disk, then rename) on every state change and every 3 s while downloading. Downloads that
 were running when the app quit are reloaded as `Queued` and continue on their own.
 
 The partial file is `<name>.gtfpart`, pre-sized and marked sparse on Windows,
@@ -224,7 +237,8 @@ only after the app has accepted it.**
 usual. All checks are in `route()` and `to_add_options()`, which are unit
 tested: `Host` must be ours, `Origin` must be `chrome-extension://…` or
 `moz-extension://…`, the add endpoint takes only JSON up to 64 KiB with an
-http(s) URL. The ping and add endpoints accept POST because Chrome omits
+http(s) URL. A request can't choose the folder: files go to the app's
+download folder. The ping and add endpoints accept POST because Chrome omits
 `Origin` on extension GET requests. With `Settings.browser_capture` off, ping
 reports `capture: false` and adds answer `409`. On success the app emits a
 `browser-added` event; the UI shows a toast without focusing the window.

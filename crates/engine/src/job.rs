@@ -9,7 +9,7 @@
 use crate::control::{Controller, Sample};
 use crate::fsutil::write_all_at;
 use crate::limit::RateLimiter;
-use crate::probe::parse_range_start;
+use crate::probe::{parse_range_start, parse_range_total};
 use crate::types::Range;
 use anyhow::anyhow;
 use parking_lot::Mutex;
@@ -70,6 +70,8 @@ const MAX_SEG_FAILURES: u32 = 6;
 const STALL_TIMEOUT: Duration = Duration::from_secs(120);
 /// Minimum gap between opening two connections (servers dislike bursts).
 const SPAWN_GAP: Duration = Duration::from_millis(150);
+/// Longest `Retry-After` we honor before trying again anyway.
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
 
 #[derive(Debug)]
 pub struct Cancelled;
@@ -412,9 +414,25 @@ pub fn initial_ranges(total: u64, connections: u32) -> Vec<Range> {
         .collect()
 }
 
+/// Where a ranged download gets its bytes from.
+pub struct Source {
+    /// The link the user added.
+    pub url: String,
+    /// Where `url` redirected to when it was probed, if segment requests may
+    /// go there directly. That saves the redirect on every connection and
+    /// keeps all connections on the same mirror. Signed links expire and some
+    /// hosts only accept requests that came through the redirect, so when
+    /// this stops working the download goes back to `url` (see `fetch_once`).
+    pub resolved: Option<String>,
+    /// File size the probe reported.
+    pub total: u64,
+}
+
 struct Ctx {
     client: Client,
-    url: String,
+    src: Source,
+    /// `src.resolved` stopped working; use `src.url`.
+    resolved_failed: AtomicBool,
     file: Arc<File>,
     job: Arc<Job>,
     token: CancellationToken,
@@ -424,7 +442,8 @@ enum FetchErr {
     /// Network hiccup: try again.
     Retry(anyhow::Error),
     /// Server is limiting connections: drop this one if others are alive.
-    Throttled(anyhow::Error),
+    /// Carries the server's `Retry-After`, if it sent one.
+    Throttled(anyhow::Error, Option<Duration>),
     /// Nothing will fix this (404, disk full, ...).
     Fatal(anyhow::Error),
 }
@@ -494,7 +513,7 @@ impl Ctx {
 /// network) is the bottleneck.
 pub async fn download_ranged(
     client: Client,
-    url: String,
+    src: Source,
     file: Arc<File>,
     job: Arc<Job>,
     connections: u32,
@@ -508,7 +527,8 @@ pub async fn download_ranged(
     let token = job.cancel.child_token();
     let ctx = Arc::new(Ctx {
         client,
-        url,
+        src,
+        resolved_failed: AtomicBool::new(false),
         file,
         job: job.clone(),
         token: token.clone(),
@@ -622,7 +642,7 @@ async fn fetch_segment(ctx: &Ctx, seg: &Arc<Segment>) -> anyhow::Result<Next> {
             return Ok(Next::More);
         }
         let res = fetch_once(ctx, seg, pos, end).await;
-        if let Err(FetchErr::Retry(e) | FetchErr::Throttled(e) | FetchErr::Fatal(e)) = &res {
+        if let Err(FetchErr::Retry(e) | FetchErr::Throttled(e, _) | FetchErr::Fatal(e)) = &res {
             debug!(
                 "segment @{pos}: {e:#} (moved {} bytes)",
                 seg.range().0 - pos
@@ -644,7 +664,7 @@ async fn fetch_segment(ctx: &Ctx, seg: &Arc<Segment>) -> anyhow::Result<Next> {
                 ctx.token.cancel();
                 return Ok(Next::Stop);
             }
-            Err(FetchErr::Throttled(_)) if ctx.job.workers.load(Relaxed) > 1 => {
+            Err(FetchErr::Throttled(..)) if ctx.job.workers.load(Relaxed) > 1 => {
                 // The server doesn't want this many connections. Step back and
                 // let the remaining workers pick up the segment later.
                 let workers = ctx.job.workers.load(Relaxed);
@@ -655,10 +675,10 @@ async fn fetch_segment(ctx: &Ctx, seg: &Arc<Segment>) -> anyhow::Result<Next> {
                 seg.release();
                 return Ok(Next::Stop);
             }
-            Err(err @ (FetchErr::Throttled(_) | FetchErr::Retry(_))) => {
-                let (throttled, e) = match err {
-                    FetchErr::Throttled(e) => (true, e),
-                    FetchErr::Retry(e) | FetchErr::Fatal(e) => (false, e),
+            Err(err @ (FetchErr::Throttled(..) | FetchErr::Retry(_))) => {
+                let (throttled, e, retry_after) = match err {
+                    FetchErr::Throttled(e, after) => (true, e, after),
+                    FetchErr::Retry(e) | FetchErr::Fatal(e) => (false, e, None),
                 };
                 if seg.range().0 > pos {
                     failures = 0;
@@ -674,6 +694,8 @@ async fn fetch_segment(ctx: &Ctx, seg: &Arc<Segment>) -> anyhow::Result<Next> {
                 } else {
                     Duration::from_millis(500 * (1u64 << failures.min(5)))
                 };
+                // The server said when to come back: don't knock earlier.
+                let wait = wait.max(retry_after.unwrap_or_default().min(MAX_RETRY_AFTER));
                 tokio::select! {
                     _ = ctx.token.cancelled() => {
                         seg.release();
@@ -686,18 +708,40 @@ async fn fetch_segment(ctx: &Ctx, seg: &Arc<Segment>) -> anyhow::Result<Next> {
     }
 }
 
-fn classify(status: StatusCode) -> FetchErr {
+fn classify(status: StatusCode, retry_after: Option<Duration>) -> FetchErr {
     let e = anyhow!("server responded with {status}");
     match status.as_u16() {
         // A full-file reply to a mid-file range usually means the server is
         // overloaded or limiting connections; back off rather than give up.
-        200 => FetchErr::Throttled(anyhow!(
-            "server ignored the range request and sent the whole file"
-        )),
+        200 => FetchErr::Throttled(
+            anyhow!("server ignored the range request and sent the whole file"),
+            None,
+        ),
         401 | 404 | 410 | 416 => FetchErr::Fatal(e),
-        403 | 429 | 503 => FetchErr::Throttled(e),
+        403 | 429 | 503 => FetchErr::Throttled(e, retry_after),
         _ => FetchErr::Retry(e),
     }
+}
+
+/// `Retry-After: 5` -> 5 s. The date form is rare for downloads and ignored.
+fn retry_after(headers: &header::HeaderMap) -> Option<Duration> {
+    let secs: u64 = headers
+        .get(header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    Some(Duration::from_secs(secs))
+}
+
+/// A different size means a different file: mixing its bytes into ours would
+/// produce a corrupt download that looks complete.
+fn changed(now: u64, was: u64) -> FetchErr {
+    FetchErr::Fatal(anyhow!(
+        "the file changed on the server while downloading \
+         (it was {was} bytes, now {now}); start it again to get the new version"
+    ))
 }
 
 async fn fetch_once(
@@ -706,17 +750,39 @@ async fn fetch_once(
     pos: u64,
     end: u64,
 ) -> Result<FetchOk, FetchErr> {
-    let req = ctx
-        .client
-        .get(&ctx.url)
-        // Open-ended on purpose: when we reach `end` we may continue into the
-        // next segment on this same connection instead of opening a new one.
-        .header(header::RANGE, format!("bytes={pos}-"))
-        .header(header::ACCEPT_ENCODING, "identity");
     let _ = end;
-    let mut resp = tokio::select! {
-        _ = ctx.token.cancelled() => return Ok(FetchOk::Cancelled),
-        r = req.send() => r.map_err(|e| FetchErr::Retry(e.into()))?,
+    let mut resp = loop {
+        // Skip the redirect while the address it led to keeps working.
+        let resolved = ctx
+            .src
+            .resolved
+            .as_deref()
+            .filter(|_| !ctx.resolved_failed.load(Relaxed));
+        let req = ctx
+            .client
+            .get(resolved.unwrap_or(&ctx.src.url))
+            // Open-ended on purpose: when we reach `end` we may continue into
+            // the next segment on this same connection instead of opening a
+            // new one.
+            .header(header::RANGE, format!("bytes={pos}-"))
+            .header(header::ACCEPT_ENCODING, "identity");
+        let sent = tokio::select! {
+            _ = ctx.token.cancelled() => return Ok(FetchOk::Cancelled),
+            r = req.send() => r,
+        };
+        // The resolved address may have expired (signed links), may want the
+        // referrer the redirect adds, or may be a mirror that went away. The
+        // original link sorts all of that out, so go back to it for good.
+        let stale = match &sent {
+            Ok(r) => r.status().is_client_error() && r.status() != StatusCode::TOO_MANY_REQUESTS,
+            Err(e) => e.is_connect(),
+        };
+        if resolved.is_some() && stale {
+            debug!("segment @{pos}: resolved link stopped working; using the original");
+            ctx.resolved_failed.store(true, Relaxed);
+            continue;
+        }
+        break sent.map_err(|e| FetchErr::Retry(e.into()))?;
     };
     let status = resp.status();
     // `bytes=0-` asks for the entire file, and servers may legally answer
@@ -724,18 +790,25 @@ async fn fetch_once(
     // exactly what we want.
     let usable = status == StatusCode::PARTIAL_CONTENT || (status == StatusCode::OK && pos == 0);
     if !usable {
-        return Err(classify(status));
+        return Err(classify(status, retry_after(resp.headers())));
     }
-    let start = (status == StatusCode::PARTIAL_CONTENT)
-        .then(|| {
-            resp.headers()
-                .get(header::CONTENT_RANGE)
-                .and_then(|v| v.to_str().ok())
-                .and_then(parse_range_start)
-        })
-        .flatten();
-    if start.is_some_and(|s| s != pos) {
-        return Err(FetchErr::Retry(anyhow!("server returned the wrong range")));
+    if status == StatusCode::PARTIAL_CONTENT {
+        let range = resp
+            .headers()
+            .get(header::CONTENT_RANGE)
+            .and_then(|v| v.to_str().ok());
+        if range.and_then(parse_range_start).is_some_and(|s| s != pos) {
+            return Err(FetchErr::Retry(anyhow!("server returned the wrong range")));
+        }
+        if let Some(now) = range.and_then(parse_range_total) {
+            if now != ctx.src.total {
+                return Err(changed(now, ctx.src.total));
+            }
+        }
+    } else if let Some(now) = resp.content_length() {
+        if now != ctx.src.total {
+            return Err(changed(now, ctx.src.total));
+        }
     }
 
     let mut buf: Vec<u8> = Vec::with_capacity(BUF_SIZE);
@@ -915,6 +988,18 @@ mod tests {
         let _second = big.claim().unwrap();
         let third = big.claim().expect("splits the big segment");
         assert!(third.range().0 >= 64 * MIN_SPLIT);
+    }
+
+    #[test]
+    fn reads_retry_after_seconds() {
+        let with = |v: &'static str| {
+            let mut h = header::HeaderMap::new();
+            h.insert(header::RETRY_AFTER, header::HeaderValue::from_static(v));
+            retry_after(&h)
+        };
+        assert_eq!(with(" 7 "), Some(Duration::from_secs(7)));
+        assert_eq!(with("Wed, 21 Oct 2026 07:28:00 GMT"), None);
+        assert_eq!(retry_after(&header::HeaderMap::new()), None);
     }
 
     #[test]

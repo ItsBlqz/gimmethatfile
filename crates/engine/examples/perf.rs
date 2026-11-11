@@ -64,6 +64,17 @@ fn scenarios() -> Vec<Scenario> {
             },
         },
         Scenario {
+            name: "redirect",
+            what: "4 MB/s per connection behind a link that takes 150 ms to redirect to the file",
+            file_mib: 64,
+            connections: 8,
+            server: ServerConfig {
+                per_conn: 4.0 * MB,
+                redirect: Some(Duration::from_millis(150)),
+                ..Default::default()
+            },
+        },
+        Scenario {
             name: "throttled",
             what: "4 MB/s per connection, 429 beyond 3 connections",
             file_mib: 48,

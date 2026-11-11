@@ -598,7 +598,15 @@ impl Inner {
             let _ = fs::create_dir_all(parent);
         }
         let tmp = self.store.with_extension("json.tmp");
-        if fs::write(&tmp, json).is_ok() {
+        // Flushed to the disk before it replaces the old list: without that,
+        // a power cut shortly after the rename can leave an empty file, and
+        // with it every download and setting would be gone.
+        let written = fs::File::create(&tmp).and_then(|mut f| {
+            use std::io::Write;
+            f.write_all(&json)?;
+            f.sync_all()
+        });
+        if written.is_ok() {
             let _ = fs::rename(&tmp, &self.store);
         }
     }
@@ -828,8 +836,14 @@ impl Inner {
             };
             match res {
                 Ok(info) => break info,
-                // Network-level errors are often transient; HTTP errors are not.
-                Err(e) if attempt < 2 && e.is::<reqwest::Error>() => {
+                // Network-level errors and overloaded servers (429, 5xx) are
+                // often transient; other HTTP errors are not.
+                Err(e)
+                    if attempt < 2
+                        && (e.is::<reqwest::Error>()
+                            || e.downcast_ref::<probe::HttpError>()
+                                .is_some_and(|h| h.is_transient())) =>
+                {
                     attempt += 1;
                     tokio::select! {
                         _ = job.cancel.cancelled() => return Err(Cancelled.into()),
@@ -850,12 +864,18 @@ impl Inner {
             && rec.total == info.total
             && match (&rec.etag, &info.etag) {
                 (Some(a), Some(b)) => a == b,
-                _ => true,
+                // Without ETags, the modification date is the next best
+                // sign that the file is still the same one.
+                _ => match (&rec.last_modified, &info.last_modified) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => true,
+                },
             }
-            && rec
-                .file_name
-                .as_deref()
-                .is_some_and(|n| part_of(n).exists());
+            // The partial file must still be there, and still be ours (it
+            // was created at the full size).
+            && rec.file_name.as_deref().is_some_and(|n| {
+                fs::metadata(part_of(n)).is_ok_and(|m| m.is_file() && Some(m.len()) == info.total)
+            });
 
         let file_name = {
             let mut st = self.state.lock();
@@ -916,14 +936,20 @@ impl Inner {
         self.save();
 
         if ranged {
-            job::download_ranged(
-                client.clone(),
-                rec.url.clone(),
-                file.clone(),
-                job.clone(),
-                connections,
-            )
-            .await?;
+            // Segment requests can skip the redirect and go straight to where
+            // it led. With our own headers (cookies, ...) only on the same
+            // host: reqwest removes them when a redirect leaves the host, and
+            // a direct request to the other host would hand them over.
+            let direct = info.final_url.as_str() != rec.url
+                && (rec.headers.is_empty()
+                    || Url::parse(&rec.url).is_ok_and(|u| u.origin() == info.final_url.origin()));
+            let src = job::Source {
+                url: rec.url.clone(),
+                resolved: direct.then(|| info.final_url.to_string()),
+                total: info.total.unwrap_or(0),
+            };
+            job::download_ranged(client.clone(), src, file.clone(), job.clone(), connections)
+                .await?;
             fsutil::set_sparse(&file, false);
         } else {
             job::download_single(client.clone(), rec.url.clone(), file.clone(), job.clone())
@@ -940,8 +966,18 @@ impl Inner {
                 file_name.clone()
             }
         };
-        fs::rename(&part, rec.dir.join(&final_name))
-            .with_context(|| format!("cannot rename {}", part.display()))?;
+        // Antivirus and indexers like to open a file the moment it is
+        // written, which makes the rename fail for a moment on Windows.
+        // Failing here would throw away a finished download, so be patient.
+        let target = rec.dir.join(&final_name);
+        let mut tries = 0;
+        while let Err(e) = fs::rename(&part, &target) {
+            tries += 1;
+            if tries >= 10 || e.kind() == std::io::ErrorKind::NotFound {
+                return Err(e).with_context(|| format!("cannot rename {}", part.display()));
+            }
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
         if let Some(e) = self.state.lock().get_mut(id) {
             e.rec.file_name = Some(final_name);
         }

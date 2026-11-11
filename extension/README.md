@@ -61,7 +61,7 @@ The app listens on `http://127.0.0.1:47811` (localhost only):
 | Request | Reply |
 |---|---|
 | `POST /v1/ping` | `200 {"app":"Gimme That File","version":"0.1.0","api":1,"capture":true}` |
-| `POST /v1/downloads` with JSON `{url, filename?, referrer?, cookies?, user_agent?, headers?, dir?}` | `201 {"id":…}`, or `409 {"error":"capture_disabled"}` when capture is off in the app |
+| `POST /v1/downloads` with JSON `{url, filename?, referrer?, cookies?, user_agent?, headers?}` | `201 {"id":…}`, or `409 {"error":"capture_disabled"}` when capture is off in the app |
 
 The app answers only requests whose `Origin` is a browser extension
 (`chrome-extension://…` or `moz-extension://…`). Web pages can't add downloads

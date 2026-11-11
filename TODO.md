@@ -20,8 +20,11 @@ items can also get an issue.
 - [ ] **~10% slower than the old engine on the Debian mirror** with the same
       number of connections (4 of 4 interleaved pairs). Suspects: more
       connections opened near the end (smaller tail splits), each going
-      through Debian's redirect. Could also resolve the redirect once and
-      reuse the final URL for segment requests.
+      through Debian's redirect. The redirect is now resolved once and
+      segment requests use the final URL: +12% in the local `redirect`
+      benchmark, but on the Debian mirror itself only +3% over 4 interleaved
+      pairs (19.7 → 20.3 MB/s), which is within the noise. The redirect
+      wasn't the main cause.
 - [ ] **Dev instance next to the installed app**: let a debug build with
       `GIMMETHATFILE_DATA_DIR` set skip the single-instance check (and use
       another receiver port), so tests don't collide with a running copy.

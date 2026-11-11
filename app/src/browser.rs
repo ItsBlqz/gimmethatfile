@@ -4,7 +4,8 @@
 //!
 //! - `POST /v1/ping`      → `{"app","version","api","capture"}` (GET works too)
 //! - `POST /v1/downloads` → JSON `{url, filename?, referrer?, cookies?,
-//!   user_agent?, headers?, dir?}`, queued with `Manager::add_with`.
+//!   user_agent?, headers?}`, queued with `Manager::add_with`. Files always
+//!   go to the app's download folder: the sender can't choose where.
 //!
 //! It only answers browser extensions: every request needs an `Origin` of
 //! `chrome-extension://…` or `moz-extension://…` and a `Host` of
@@ -19,7 +20,6 @@ use gtf_engine::{AddOptions, Manager};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::Read;
-use std::path::PathBuf;
 use tauri::{AppHandle, Emitter};
 use tiny_http::{Header, Request, Response, Server};
 
@@ -66,8 +66,6 @@ pub struct CaptureRequest {
     pub user_agent: Option<String>,
     /// Any other request headers. Unsafe ones are dropped by the engine.
     pub headers: BTreeMap<String, String>,
-    /// Absolute folder to save into; defaults to the app's download folder.
-    pub dir: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -157,11 +155,9 @@ pub fn to_add_options(body: &[u8]) -> Result<(String, AddOptions), Reject> {
     if let Some(ua) = some(req.user_agent).filter(|_| cookies.is_some()) {
         headers.push(("User-Agent".into(), ua));
     }
-    let dir = some(req.dir).map(PathBuf::from).filter(|d| d.is_absolute());
     Ok((
         url.to_string(),
         AddOptions {
-            dir,
             name_hint: some(req.filename),
             headers,
             ..Default::default()
@@ -438,11 +434,11 @@ mod tests {
 
         // No cookies: the browser's UA is not used.
         let (_, opts) = to_add_options(
-            br#"{"url":"http://example.com/a","user_agent":"Mozilla/5.0","dir":"relative"}"#,
+            br#"{"url":"http://example.com/a","user_agent":"Mozilla/5.0","dir":"C:/Users/x/Startup"}"#,
         )
         .unwrap();
         assert!(opts.headers.is_empty());
-        assert!(opts.dir.is_none(), "only absolute folders");
+        assert!(opts.dir.is_none(), "an extension can't choose the folder");
 
         for (body, why) in [
             (&br#"{"url":"file:///C:/Windows/win.ini"}"#[..], "http_only"),

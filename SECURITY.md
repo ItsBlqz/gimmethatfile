@@ -46,6 +46,9 @@ it downloads. It is built so that only browser extensions can use it:
 - Adding a download requires `Content-Type: application/json` (which a page
   can't send cross-origin without a preflight), a body of at most 64 KiB, and an
   `http`/`https` URL.
+- A request can't choose where the file is saved (always the app's download
+  folder) and file names are sanitized, so even a malicious extension can't
+  place files elsewhere on the disk.
 - With **Settings → Browser → Accept downloads sent by the browser extension**
   turned off, it adds nothing and the extension leaves downloads to the browser.
 

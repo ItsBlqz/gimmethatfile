@@ -21,7 +21,19 @@ First public release (will be tagged `v0.1.0`).
   Reducing connections based on measured speed alone is experimental and off
   by default (`GTF_ADAPTIVE_DOWN=1`; see `docs/BENCHMARKS.md`).
 - Pause and resume, which survive app restarts and crashes. A changed file
-  (different size or ETag) is detected and restarted.
+  (different size, ETag or modification date) is detected and restarted, and
+  so is a partial file that was damaged in the meantime. A file that changes
+  size on the server *during* a download fails it instead of producing a
+  corrupt file.
+- Redirecting links (GitHub releases, mirror pickers) are resolved once;
+  connections then go straight to the file, falling back to the original
+  link if that address stops working (expired signed links).
+- Patience with busy servers: `429`/`5xx` on the first request is retried,
+  `Retry-After` is honored, and a finished file that Windows briefly locks
+  (antivirus) is still moved into place.
+- File names: raw UTF-8, percent-encoded and quoted `Content-Disposition`
+  names are understood; very long names are shortened to fit the file
+  system; invisible text-direction characters are removed.
 - Single-connection fallback for servers without range support.
 - Download queue with a configurable number of simultaneous downloads.
 - Speed limits: one for all downloads together (Settings → Speed) and one per
