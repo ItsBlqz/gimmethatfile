@@ -99,6 +99,10 @@ pull request (the **Performance** workflow). It works in three layers:
    the internet. Too noisy to pass or fail anything; it shows trends and
    feeds [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
+Layers 1 and 2 only measure when a pull request changes `crates/engine/`,
+`Cargo.toml`/`Cargo.lock` or the benchmark scripts. For anything else (UI, app,
+extension, docs) they pass in a few seconds without measuring.
+
 The numbers from 1 and 2 answer "did this change make the engine slower?",
 not "how fast is it for users?". Speed claims come from real-world runs.
 
