@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Apply (or update) the branch protection ruleset in .github/rulesets/main.json.
 #
-# GitHub only allows rulesets on private repos with a paid plan, so run this
-# right after making the repository public:
+# Run it again after changing the ruleset file:
 #
 #     scripts/protect-main.sh
 #

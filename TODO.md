@@ -45,16 +45,11 @@ items can also get an issue.
 
 ## Backlog
 
-- [ ] Auto-update (`tauri-plugin-updater` + signed update manifest). The update
-      feed is served from GitHub Releases, which needs the repo to be public.
-- [ ] Code signing for the Windows installer (e.g. SignPath, free for open
-      source projects, which means the repo has to be public).
+- [ ] Auto-update (`tauri-plugin-updater` + signed update manifest), with the
+      update feed served from GitHub Releases.
+- [ ] Code signing for the Windows installer (SignPath Foundation, free for
+      open source projects), so SmartScreen stops warning.
 - [ ] macOS and Linux release builds.
-- [ ] Publish: make the repo public, run `scripts/protect-main.sh`, enable
-      private vulnerability reporting (also used for private Code of Conduct
-      reports), upload `docs/social-preview.png` (Settings → Social preview),
-      rename `[Unreleased]` in CHANGELOG.md to `[0.1.0] - <date>`, tag
-      `v0.1.0`, and publish the draft release.
 
 ## Done
 

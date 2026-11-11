@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS runners cost 10x minutes on private repos; enable them once public.
+        # macOS only on public repos: its runners cost 10x minutes on private ones (e.g. private forks).
         os: ${{ fromJSON(github.event.repository.private && '["ubuntu-latest","windows-latest"]' || '["ubuntu-latest","windows-latest","macos-latest"]') }}
     steps:
       - uses: actions/checkout@v7
