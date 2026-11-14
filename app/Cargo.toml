@@ -26,4 +26,4 @@ tauri-plugin-notification = "2"
 auto-launch = "0.6"
 
 [target."cfg(windows)".dependencies]
-windows-registry = "0.6"
+windows-registry = "0.100"
